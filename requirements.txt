@@ -1,0 +1,5 @@
+streamlit>=1.60,<2
+supabase>=2.31,<3
+python-dotenv>=1.0
+pandas>=2.2,<3
+tzdata; sys_platform == "linux"
