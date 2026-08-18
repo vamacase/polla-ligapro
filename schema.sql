@@ -21,6 +21,18 @@ create table if not exists partidos (
     cerrado boolean not null default false  -- true = ya no se puede predecir
 );
 
+create table if not exists equipos (
+    -- id de SofaScore: team_id para escudos de equipo, o el unique-tournament
+    -- id (240) para el logo de la liga. La API de imágenes de SofaScore está
+    -- detrás de Cloudflare y bloquea hotlinking directo desde el navegador
+    -- (403 aunque se manden Referer/User-Agent); por eso se cachea acá una
+    -- sola vez vía Playwright (sync_polla.py sync_logos) en vez de enlazar
+    -- en vivo.
+    id bigint primary key,
+    logo_base64 text,
+    actualizado_en timestamptz not null default now()
+);
+
 create table if not exists predicciones (
     id serial primary key,
     jugador_id int not null references jugadores(id) on delete cascade,
@@ -66,6 +78,7 @@ order by puntos_totales desc, aciertos_exactos desc;
 -- abiertas para que la anon key pueda leer/escribir estas tablas.
 alter table jugadores enable row level security;
 alter table partidos enable row level security;
+alter table equipos enable row level security;
 alter table predicciones enable row level security;
 
 drop policy if exists jugadores_all on jugadores;
@@ -73,6 +86,9 @@ create policy jugadores_all on jugadores for all using (true) with check (true);
 
 drop policy if exists partidos_all on partidos;
 create policy partidos_all on partidos for all using (true) with check (true);
+
+drop policy if exists equipos_all on equipos;
+create policy equipos_all on equipos for all using (true) with check (true);
 
 drop policy if exists predicciones_all on predicciones;
 create policy predicciones_all on predicciones for all using (true) with check (true);

@@ -4,6 +4,7 @@ SYNC POLLA — corre en tu PC (necesita Playwright para pasar Cloudflare de Sofa
 Uso:
     python sync_polla.py fixture [ronda]   # sube próximos partidos (predecibles)
     python sync_polla.py resultados        # actualiza marcadores reales + cierra partidos
+    python sync_polla.py logos             # cachea escudos (equipos nuevos que aún no tengan logo)
 
 Reusa el scraper de 10-prediction/src/sofascore.py y predecir.py (no se duplica lógica).
 """
@@ -85,6 +86,50 @@ def sync_resultados(anio=2026):
     print(f"\n{actualizados} partidos actualizados con resultado real.")
 
 
+def sync_logos():
+    """Descarga y cachea escudos de equipo + logo de la liga (base64) en Supabase.
+
+    Necesario porque la API de imágenes de SofaScore está detrás de Cloudflare
+    y bloquea hotlinking directo (403 aunque se manden Referer/User-Agent) —
+    solo responde a un navegador que ya pasó el challenge, como el que arma
+    SofaScore() acá. La app web (sin Playwright) sirve estas imágenes cacheadas.
+    """
+    db = get_client()
+    partidos = db.table("partidos").select("local_id, visita_id").execute().data
+    ids_equipos = ({p["local_id"] for p in partidos if p["local_id"]} |
+                    {p["visita_id"] for p in partidos if p["visita_id"]})
+    ya_cacheados = {e["id"] for e in db.table("equipos").select("id").execute().data}
+
+    objetivos = [(tid, f"/api/v1/team/{tid}/image") for tid in ids_equipos if tid not in ya_cacheados]
+    if TOURN not in ya_cacheados:
+        objetivos.append((TOURN, f"/api/v1/unique-tournament/{TOURN}/image"))
+
+    if not objetivos:
+        print("Todos los escudos ya están cacheados.")
+        return
+
+    print(f"Descargando {len(objetivos)} escudos...")
+    js = """async (p) => {
+        const r = await fetch(p);
+        if (r.status !== 200) return {status: r.status, body: null};
+        const buf = await r.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+        return {status: 200, body: btoa(binary)};
+    }"""
+    with SofaScore() as sofa:
+        for tid, path in objetivos:
+            res = sofa.page.evaluate(js, path)
+            if res["status"] == 200 and res["body"]:
+                db.table("equipos").upsert({"id": tid, "logo_base64": res["body"]}).execute()
+                print(f"  [ok] id {tid}")
+            else:
+                print(f"  [!] id {tid} -> status {res['status']}")
+            sofa.page.wait_for_timeout(300)
+    print("Listo.")
+
+
 def cerrar_por_kickoff():
     """Cierra (bloquea predicciones) los partidos cuyo kickoff ya pasó, aunque no haya resultado aún."""
     from datetime import datetime, timezone
@@ -104,5 +149,7 @@ if __name__ == "__main__":
         cerrar_por_kickoff()
     elif modo == "cerrar":
         cerrar_por_kickoff()
+    elif modo == "logos":
+        sync_logos()
     else:
         print(__doc__)

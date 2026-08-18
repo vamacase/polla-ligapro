@@ -15,9 +15,9 @@ from db import get_client  # noqa: E402
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
 
 TZ_EC = "America/Guayaquil"
-LOGO_URL = "https://api.sofascore.com/api/v1/team/{id}/image"
-LIGA_ID = 240  # unique-tournament de LigaPro Ecuador en SofaScore
-LIGA_LOGO_URL = f"https://api.sofascore.com/api/v1/unique-tournament/{LIGA_ID}/image"
+LIGA_ID = 240  # unique-tournament de LigaPro Ecuador en SofaScore; también la
+                # clave usada para su logo en la tabla equipos (mismo espacio
+                # de ids que los team_id, sin colisión real posible).
 
 # --- CSS consolidado (paleta verde salvia + crema) ------------------------
 # Nota: las clases .st-key-<key> son API pública de Streamlit (verificado en
@@ -89,10 +89,31 @@ st.html("""
 """)
 
 
+@st.cache_resource
+def db():
+    return get_client()
+
+
+@st.cache_data(ttl=3600)
+def cargar_logos():
+    """id (team_id o LIGA_ID) -> logo en base64, cacheado por sync_polla.py logos.
+
+    No se hotlinkea directo a SofaScore: su API de imágenes está detrás de
+    Cloudflare y bloquea cualquier <img src> externo (403 aunque se manden
+    Referer/User-Agent) — solo responde a un navegador que ya pasó el
+    challenge, como el que usa Playwright durante el sync.
+    """
+    filas = db().table("equipos").select("id, logo_base64").execute().data
+    return {f["id"]: f["logo_base64"] for f in filas if f["logo_base64"]}
+
+
 def logo(team_id, size=48):
     if not team_id:
         return ""
-    return f'<img src="{LOGO_URL.format(id=team_id)}" width="{size}" height="{size}" style="object-fit:contain">'
+    b64 = cargar_logos().get(team_id)
+    if not b64:
+        return f'<span style="font-size:{size}px; line-height:1">⚽</span>'
+    return f'<img src="data:image/png;base64,{b64}" width="{size}" height="{size}" style="object-fit:contain">'
 
 
 def a_local(ts) -> pd.Timestamp:
@@ -149,11 +170,6 @@ def rango_polla(numero: int) -> tuple[int, int]:
     return inicio, inicio + 4
 
 
-@st.cache_resource
-def db():
-    return get_client()
-
-
 def get_admin_pin():
     pin = os.environ.get("ADMIN_PIN")
     if not pin:
@@ -167,7 +183,7 @@ def get_admin_pin():
 def login():
     with st.container(border=True, key="card_login"):
         st.markdown(
-            f'<div style="text-align:center"><img src="{LIGA_LOGO_URL}" width="100"></div>',
+            f'<div style="text-align:center">{logo(LIGA_ID, 100)}</div>',
             unsafe_allow_html=True)
         st.title("Polla Liga Pro Ecuador")
         jugadores = db().table("jugadores").select("id, nombre").order("nombre").execute().data
@@ -239,7 +255,7 @@ def tarjeta_partido(p, mis_pred):
 def vista_predicciones():
     jugador_id = st.session_state["jugador_id"]
     st.markdown(
-        f'<div style="text-align:center"><img src="{LIGA_LOGO_URL}" width="70"></div>',
+        f'<div style="text-align:center">{logo(LIGA_ID, 70)}</div>',
         unsafe_allow_html=True)
     st.subheader(f"Hola, {st.session_state['jugador_nombre']} 👋")
     partidos = cargar_partidos_abiertos()
