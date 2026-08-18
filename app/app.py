@@ -172,6 +172,27 @@ def rango_polla(numero: int) -> tuple[int, int]:
     return inicio, inicio + 4
 
 
+def calcular_estado_prediccion(ronda):
+    """Para una fecha, cuenta cuántos partidos predijo cada jugador.
+
+    Nunca expone los marcadores que cada quien predijo — solo si ya
+    completó su predicción o no — para no arruinar la sorpresa antes de
+    que cierren los partidos (ver reglamento: la apuesta debe publicarse
+    sin haber visto la de los demás).
+    """
+    partidos_ronda = db().table("partidos").select("id").eq("fecha_ronda", ronda).execute().data
+    ids_ronda = [p["id"] for p in partidos_ronda]
+    total = len(ids_ronda)
+    jugadores = db().table("jugadores").select("id, nombre").order("nombre").execute().data
+    preds = (db().table("predicciones").select("jugador_id, partido_id")
+             .in_("partido_id", ids_ronda).execute().data if ids_ronda else [])
+    contadas = {}
+    for pr in preds:
+        contadas[pr["jugador_id"]] = contadas.get(pr["jugador_id"], 0) + 1
+    return [{"id": j["id"], "nombre": j["nombre"], "n": contadas.get(j["id"], 0), "total": total}
+            for j in jugadores]
+
+
 def get_admin_pin():
     pin = os.environ.get("ADMIN_PIN")
     if not pin:
@@ -336,6 +357,17 @@ def fila_ranking(i, fila, es_yo):
         unsafe_allow_html=True)
 
 
+def fila_estado_jugador(nombre, completo, es_yo):
+    icono = "✅" if completo else "⏳"
+    clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
+    st.markdown(
+        f'<div class="{clase}">'
+        f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
+        f'<span style="font-size:1.1em">{icono}</span>'
+        f'</div>',
+        unsafe_allow_html=True)
+
+
 def vista_ranking():
     st.subheader("🏆 Ranking")
 
@@ -424,26 +456,39 @@ def vista_mis_predicciones():
     jugador_id = st.session_state["jugador_id"]
     st.subheader("📝 Mis predicciones")
 
-    # Se muestran TODAS las predicciones (jugadas y pendientes), no solo las
-    # que ya tienen resultado — esto duplicaba como confirmación de "sí se
-    # guardó" para el jugador, algo que antes no existía en ningún lado.
+    # El selector de fecha se basa en TODOS los partidos cargados, no solo
+    # en los que el jugador actual ya predijo — si no, alguien que aún no
+    # predice nada en una fecha ni siquiera podría seleccionarla para ver
+    # el checklist de quién sí lo hizo.
+    partidos_todos = db().table("partidos").select("fecha_ronda").execute().data
+    rondas = sorted({p["fecha_ronda"] for p in partidos_todos if p["fecha_ronda"] is not None}, reverse=True)
+    if not rondas:
+        st.info("Todavía no hay partidos cargados.")
+        return
+    ronda_sel = selector_fecha(rondas, key="ronda_mis_pred")
+
+    # Checklist de quién ya predijo esta fecha: solo el estado (✅/⏳), nunca
+    # el marcador que cada quien puso — eso arruinaría la apuesta antes de
+    # que cierren los partidos.
+    st.markdown("#### Quién ya predijo esta fecha")
+    estado_jugadores = calcular_estado_prediccion(ronda_sel)
+    for e in estado_jugadores:
+        completo = e["total"] > 0 and e["n"] >= e["total"]
+        fila_estado_jugador(e["nombre"], completo, e["id"] == jugador_id)
+
+    st.markdown("#### Mis predicciones de esta fecha")
     filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda)")
              .eq("jugador_id", jugador_id).execute().data)
-    if not filas:
-        st.info("Todavía no has hecho ninguna predicción.")
-        return
-
-    rondas = sorted({f["partidos"]["fecha_ronda"] for f in filas}, key=lambda r: (r is None, r), reverse=True)
-    ronda_sel = selector_fecha(rondas, key="ronda_mis_pred")
     de_la_ronda = sorted(
         (f for f in filas if f["partidos"]["fecha_ronda"] == ronda_sel),
         key=lambda f: f["partidos"]["kickoff"])
+    if not de_la_ronda:
+        st.info("Todavía no has predicho ningún partido de esta fecha.")
+        return
 
     jugados = [f for f in de_la_ronda if f["puntos"] is not None]
     if jugados:
         st.metric("Puntos en esta fecha", sum(f["puntos"] for f in jugados))
-    else:
-        st.caption("Aún no se han jugado los partidos de esta fecha.")
 
     for f in de_la_ronda:
         pa = f["partidos"]
@@ -495,7 +540,6 @@ def vista_admin():
     ronda_sel = selector_fecha(rondas, key="ronda_admin")
     partidos_ronda = sorted(
         (p for p in partidos if p["fecha_ronda"] == ronda_sel), key=lambda p: p["kickoff"])
-    ids_ronda = [p["id"] for p in partidos_ronda]
 
     st.markdown("#### Partidos de la fecha")
     tabla_partidos = pd.DataFrame([{
@@ -507,23 +551,15 @@ def vista_admin():
     st.dataframe(tabla_partidos, width="stretch", hide_index=True)
 
     st.markdown("#### Quién ya predijo esta fecha")
-    predicciones = (db().table("predicciones").select("jugador_id, partido_id")
-                    .in_("partido_id", ids_ronda).execute().data if ids_ronda else [])
-    contadas = {}
-    for pr in predicciones:
-        contadas[pr["jugador_id"]] = contadas.get(pr["jugador_id"], 0) + 1
-
-    total_partidos = len(partidos_ronda)
     filas_check = []
-    for j in jugadores:
-        n = contadas.get(j["id"], 0)
-        if n == 0:
+    for e in calcular_estado_prediccion(ronda_sel):
+        if e["n"] == 0:
             estado = "❌ Nada"
-        elif n < total_partidos:
-            estado = f"⚠️ Parcial ({n}/{total_partidos})"
+        elif e["n"] < e["total"]:
+            estado = f"⚠️ Parcial ({e['n']}/{e['total']})"
         else:
             estado = "✅ Completo"
-        filas_check.append({"Jugador": j["nombre"], "Predicciones": f"{n}/{total_partidos}", "Estado": estado})
+        filas_check.append({"Jugador": e["nombre"], "Predicciones": f"{e['n']}/{e['total']}", "Estado": estado})
     st.dataframe(pd.DataFrame(filas_check), width="stretch", hide_index=True)
 
     st.markdown("#### Lista de jugadores")
