@@ -20,6 +20,34 @@ Webapp para que 10 amigos predigan marcadores de la Liga Pro y compitan en un ra
 └── requirements.txt
 ```
 
+## Ambientes: desarrollo vs producción
+
+Hay dos bases de Supabase separadas para no arriesgar los datos reales de la
+polla al probar cambios:
+
+| Ambiente | Archivo de credenciales | Quién lo usa |
+|---|---|---|
+| **Desarrollo** | `.env` | `streamlit run app/app.py` local (por defecto), y `sync_polla.py`/`admin_jugadores.py` sin flags |
+| **Producción** | `.env.prod` (local) / Secrets de Streamlit Cloud (deploy) | La app desplegada en `polla-papers-ligapro.streamlit.app`, y los scripts de sync/admin cuando se les pasa `--prod` |
+
+**Regla práctica:** cualquier prueba local (`streamlit run app/app.py`) apunta
+siempre a desarrollo — nunca toca los datos reales de los 10 amigos. Para
+operar sobre la polla real desde la terminal (cargar el fixture de verdad,
+cerrar resultados reales, dar de alta un jugador real) hay que agregar
+`--prod` explícitamente:
+
+```bash
+python sync_polla.py fixture --prod        # actualiza la POLLA REAL
+python sync_polla.py resultados --prod
+python admin_jugadores.py agregar "Nombre Apellido" 1234 --prod
+```
+
+Sin `--prod`, estos mismos comandos operan sobre la base de desarrollo — sirve
+para probar el flujo completo (fixture ficticio, predicciones, resultados)
+sin riesgo. El código (`app/app.py`) se despliega a producción con cada
+`git push` a `master` (Streamlit Cloud redeploya solo), pero **los datos
+nunca se mezclan** porque cada ambiente tiene su propio proyecto Supabase.
+
 ## Puntaje
 
 - **3 puntos**: marcador exacto (ej. predices 2-1, resultado real 2-1).

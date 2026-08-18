@@ -148,9 +148,11 @@ def badge_cuenta_regresiva(kickoff, ahora=None) -> str:
 
 
 def pill_puntos(puntos) -> str:
-    etiquetas = {3: ("Exacto", "3"), 1: ("1X2", "1"), 0: ("Fallo", "0")}
+    if puntos is None:
+        return '<span class="polla-pill polla-pill--na">Pendiente</span>'
+    etiquetas = {3: "Exacto", 1: "1X2", 0: "Fallo"}
     clase = f"polla-pill--{puntos}" if puntos in etiquetas else "polla-pill--na"
-    texto = etiquetas.get(puntos, ("—", "?"))[0]
+    texto = etiquetas.get(puntos, "—")
     return f'<span class="polla-pill {clase}">{texto}</span>'
 
 
@@ -258,6 +260,18 @@ def vista_predicciones():
         f'<div style="text-align:center">{logo(LIGA_ID, 70)}</div>',
         unsafe_allow_html=True)
     st.subheader(f"Hola, {st.session_state['jugador_nombre']} 👋")
+
+    # Mensaje persistente: el st.success de más abajo se mostraba un instante
+    # antes del st.rerun() y desaparecía sin que el usuario lo notara, dejando
+    # la sensación de que "no pasó nada" al guardar. Se guarda en
+    # session_state para que sobreviva al rerun y se vea arriba de la página.
+    if "mensaje_guardado" in st.session_state:
+        guardados, rechazados = st.session_state.pop("mensaje_guardado")
+        if guardados:
+            st.success(f"✅ ¡{guardados} predicciones guardadas correctamente!")
+        if rechazados:
+            st.error("⚠️ No se guardaron (el partido ya inició): " + ", ".join(rechazados))
+
     partidos = cargar_partidos_abiertos()
     if not partidos:
         st.info("No hay partidos abiertos para predecir por ahora. Vuelve pronto.")
@@ -304,10 +318,7 @@ def vista_predicciones():
                     "actualizado_en": ahora.isoformat(),
                 }, on_conflict="jugador_id,partido_id").execute()
                 guardados += 1
-            if guardados:
-                st.success(f"¡{guardados} predicciones guardadas!")
-            if rechazados:
-                st.error("No se guardaron (el partido ya inició): " + ", ".join(rechazados))
+            st.session_state["mensaje_guardado"] = (guardados, rechazados)
             st.rerun()
 
 
@@ -413,32 +424,40 @@ def vista_mis_predicciones():
     jugador_id = st.session_state["jugador_id"]
     st.subheader("📝 Mis predicciones")
 
+    # Se muestran TODAS las predicciones (jugadas y pendientes), no solo las
+    # que ya tienen resultado — esto duplicaba como confirmación de "sí se
+    # guardó" para el jugador, algo que antes no existía en ningún lado.
     filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda)")
              .eq("jugador_id", jugador_id).execute().data)
-    jugadas = [f for f in filas if f["puntos"] is not None]
-    if not jugadas:
-        st.info("Todavía no tienes predicciones con resultado. Vuelve cuando se jueguen partidos.")
+    if not filas:
+        st.info("Todavía no has hecho ninguna predicción.")
         return
 
-    rondas = sorted({f["partidos"]["fecha_ronda"] for f in jugadas}, key=lambda r: (r is None, r), reverse=True)
+    rondas = sorted({f["partidos"]["fecha_ronda"] for f in filas}, key=lambda r: (r is None, r), reverse=True)
     ronda_sel = selector_fecha(rondas, key="ronda_mis_pred")
     de_la_ronda = sorted(
-        (f for f in jugadas if f["partidos"]["fecha_ronda"] == ronda_sel),
+        (f for f in filas if f["partidos"]["fecha_ronda"] == ronda_sel),
         key=lambda f: f["partidos"]["kickoff"])
 
-    total = sum(f["puntos"] for f in de_la_ronda)
-    st.metric("Puntos en esta fecha", total)
+    jugados = [f for f in de_la_ronda if f["puntos"] is not None]
+    if jugados:
+        st.metric("Puntos en esta fecha", sum(f["puntos"] for f in jugados))
+    else:
+        st.caption("Aún no se han jugado los partidos de esta fecha.")
 
     for f in de_la_ronda:
         pa = f["partidos"]
         with st.container(border=True, key=f"card_mipred_{f['prediccion_id']}"):
-            kickoff_local = a_local(pa["kickoff"]).strftime("%d/%m")
+            kickoff_local = a_local(pa["kickoff"]).strftime("%d/%m %H:%M")
             c1, c2 = st.columns([4, 1])
             with c1:
+                if f["puntos"] is not None:
+                    detalle = f"real {f['gl_real']}-{f['gv_real']} · {kickoff_local}"
+                else:
+                    detalle = f"pendiente · {kickoff_local}"
                 st.markdown(
                     f"**{pa['local']} {f['gl_pred']}-{f['gv_pred']} {pa['visita']}**  \n"
-                    f"<span style='color:var(--polla-muted); font-size:0.85em'>"
-                    f"real {f['gl_real']}-{f['gv_real']} · {kickoff_local}</span>",
+                    f"<span style='color:var(--polla-muted); font-size:0.85em'>{detalle}</span>",
                     unsafe_allow_html=True)
             with c2:
                 st.markdown(pill_puntos(f["puntos"]), unsafe_allow_html=True)

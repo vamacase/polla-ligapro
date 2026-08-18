@@ -2,14 +2,21 @@
 SYNC POLLA — corre en tu PC (necesita Playwright para pasar Cloudflare de SofaScore).
 
 Uso:
-    python sync_polla.py fixture [ronda]   # sube próximos partidos (predecibles)
-    python sync_polla.py resultados        # actualiza marcadores reales + cierra partidos
-    python sync_polla.py logos             # cachea escudos (equipos nuevos que aún no tengan logo)
+    python sync_polla.py fixture [ronda] [--prod]   # sube próximos partidos (predecibles)
+    python sync_polla.py resultados [--prod]        # actualiza marcadores reales + cierra partidos
+    python sync_polla.py logos [--prod]              # cachea escudos (equipos nuevos que aún no tengan logo)
+
+Por defecto usa .env (base de DESARROLLO). Agregar --prod para operar sobre la
+polla REAL (usa .env.prod) — solo cuando el cambio ya esté probado en dev.
 
 Reusa el scraper de 10-prediction/src/sofascore.py y predecir.py (no se duplica lógica).
 """
 import sys
 from pathlib import Path
+
+ES_PROD = "--prod" in sys.argv
+if ES_PROD:
+    sys.argv.remove("--prod")
 
 RAIZ_PROYECTOS = Path(__file__).resolve().parents[3]  # .../01_vicente
 PRED_SRC = RAIZ_PROYECTOS / "00_Gestion_procesos_vm" / "10-prediction" / "src"
@@ -17,7 +24,9 @@ sys.path.insert(0, str(PRED_SRC))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 11-polla-ligapro/ para db.py
 
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+ARCHIVO_ENV = ".env.prod" if ES_PROD else ".env"
+load_dotenv(Path(__file__).resolve().parents[1] / ARCHIVO_ENV)
+print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV}]")
 
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
 from predecir import proximos_partidos  # noqa: E402

@@ -2,14 +2,23 @@
 ADMIN — alta de jugadores de la polla.
 
 Uso:
-    python admin_jugadores.py agregar "Nombre Apellido" 1234
-    python admin_jugadores.py listar
+    python admin_jugadores.py agregar "Nombre Apellido" 1234 [--prod]
+    python admin_jugadores.py listar [--prod]
+
+Por defecto usa .env (base de DESARROLLO). Agregar --prod para operar sobre
+la polla REAL (usa .env.prod).
 """
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+ES_PROD = "--prod" in sys.argv
+if ES_PROD:
+    sys.argv.remove("--prod")
+
+ARCHIVO_ENV = ".env.prod" if ES_PROD else ".env"
+load_dotenv(Path(__file__).resolve().parent / ARCHIVO_ENV)
+print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV}]")
 from db import get_client  # noqa: E402
 
 
