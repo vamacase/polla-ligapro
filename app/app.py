@@ -84,6 +84,16 @@ st.html("""
     div[data-testid="stNumberInput"] input { font-size: 1rem; padding: 0.5rem; }
     h3 { font-size: 1.1rem; }
     .polla-equipo { min-height: 4rem; }
+    /* Botones +/- del marcador: área táctil grande en móvil (112px).
+       Testids verificados en Streamlit 1.60.0. */
+    [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {
+        min-width: 7rem !important;
+        min-height: 7rem !important;
+    }
+    [data-testid="stNumberInputStepUp"] svg, [data-testid="stNumberInputStepDown"] svg {
+        width: 2.8rem !important;
+        height: 2.8rem !important;
+    }
 }
 </style>
 """)
@@ -191,6 +201,11 @@ def calcular_estado_prediccion(ronda):
         contadas[pr["jugador_id"]] = contadas.get(pr["jugador_id"], 0) + 1
     return [{"id": j["id"], "nombre": j["nombre"], "n": contadas.get(j["id"], 0), "total": total}
             for j in jugadores]
+
+
+def fecha_totalmente_predicha(estado_jugadores) -> bool:
+    """True si TODOS los jugadores ya predijeron TODOS los partidos de la fecha."""
+    return bool(estado_jugadores) and all(e["total"] > 0 and e["n"] >= e["total"] for e in estado_jugadores)
 
 
 def get_admin_pin():
@@ -311,6 +326,14 @@ def vista_predicciones():
     else:
         st.success(f"✅ Ya predijiste los {len(partidos_ronda)} partidos de esta fecha.")
 
+    # Seguro: una vez que TODOS predijeron TODA la fecha, se revela en "Mis
+    # predicciones" — a partir de ahí ya no se puede editar, para que nadie
+    # vea las apuestas de los demás y luego cambie la suya antes del cierre.
+    if fecha_totalmente_predicha(calcular_estado_prediccion(ronda_sel)):
+        st.info("🔒 Todos ya predijeron esta fecha — las predicciones quedaron congeladas. "
+                "Ve a 'Mis predicciones' para verlas todas.")
+        return
+
     with st.form("form_predicciones"):
         valores = {}
         for i, p in enumerate(partidos_ronda, start=1):
@@ -364,6 +387,17 @@ def fila_estado_jugador(nombre, completo, es_yo):
         f'<div class="{clase}">'
         f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
         f'<span style="font-size:1.1em">{icono}</span>'
+        f'</div>',
+        unsafe_allow_html=True)
+
+
+def fila_prediccion_jugador(nombre, gl_pred, gv_pred, puntos, es_yo):
+    clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
+    st.markdown(
+        f'<div class="{clase}">'
+        f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
+        f'<span style="margin-right:0.6rem; font-weight:600">{gl_pred}-{gv_pred}</span>'
+        f'{pill_puntos(puntos)}'
         f'</div>',
         unsafe_allow_html=True)
 
@@ -475,6 +509,29 @@ def vista_mis_predicciones():
     for e in estado_jugadores:
         completo = e["total"] > 0 and e["n"] >= e["total"]
         fila_estado_jugador(e["nombre"], completo, e["id"] == jugador_id)
+
+    # Revelación: recién cuando LOS 10 terminaron de predecir TODA la fecha
+    # se muestra qué puso cada quien en cada partido. Antes de eso nadie ve
+    # nada — ver esto y luego editar la propia predicción sería copiarse.
+    if fecha_totalmente_predicha(estado_jugadores):
+        st.markdown("#### 🔓 Predicciones de todos — fecha completa")
+        partidos_ronda_full = (db().table("partidos").select("id, local, visita, kickoff")
+                                .eq("fecha_ronda", ronda_sel).order("kickoff").execute().data)
+        ids_ronda = [p["id"] for p in partidos_ronda_full]
+        todas = (db().table("v_puntos")
+                 .select("jugador_id, partido_id, gl_pred, gv_pred, puntos, jugadores(nombre)")
+                 .in_("partido_id", ids_ronda).execute().data)
+        por_partido = {}
+        for f in todas:
+            por_partido.setdefault(f["partido_id"], []).append(f)
+
+        for i, p in enumerate(partidos_ronda_full, start=1):
+            preds_partido = sorted(por_partido.get(p["id"], []), key=lambda f: f["jugadores"]["nombre"])
+            with st.expander(f"Partido {i}: {p['local']} vs {p['visita']}"):
+                for f in preds_partido:
+                    fila_prediccion_jugador(
+                        f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"], f["puntos"],
+                        f["jugador_id"] == jugador_id)
 
     st.markdown("#### Mis predicciones de esta fecha")
     filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda)")
