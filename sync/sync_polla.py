@@ -18,9 +18,12 @@ ES_PROD = "--prod" in sys.argv
 if ES_PROD:
     sys.argv.remove("--prod")
 
-RAIZ_PROYECTOS = Path(__file__).resolve().parents[3]  # .../01_vicente
-PRED_SRC = RAIZ_PROYECTOS / "00_Gestion_procesos_vm" / "10-prediction" / "src"
-sys.path.insert(0, str(PRED_SRC))
+RAIZ_PROYECTOS = Path(__file__).resolve().parents[3] if len(Path(__file__).resolve().parents) > 3 else None
+PRED_SRC = RAIZ_PROYECTOS / "00_Gestion_procesos_vm" / "10-prediction" / "src" if RAIZ_PROYECTOS else None
+if PRED_SRC and PRED_SRC.exists():
+    sys.path.insert(0, str(PRED_SRC))  # monorepo local (dev): sofascore.py + predecir.py completos
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "_vendor"))  # CI: solo sofascore.py vendorizado
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 11-polla-ligapro/ para db.py
 
 from dotenv import load_dotenv
@@ -29,12 +32,12 @@ load_dotenv(Path(__file__).resolve().parents[1] / ARCHIVO_ENV)
 print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV}]")
 
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
-from predecir import proximos_partidos  # noqa: E402
 from db import get_client  # noqa: E402
 
 
 def sync_fixture(anio=2026, max_partidos=10, ronda=None):
     """Trae próximos partidos de SofaScore y los inserta/actualiza en Supabase."""
+    from predecir import proximos_partidos  # requiere el monorepo local (10-prediction/src)
     print("Consultando próximos partidos en SofaScore...")
     partidos = proximos_partidos(anio=anio, max_partidos=max_partidos, con_odds=False, ronda=ronda)
     if not partidos:

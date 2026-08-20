@@ -129,3 +129,21 @@ python sync_polla.py resultados     # trae marcadores reales, cierra partidos, c
 ```
 
 El ranking se recalcula solo (es una vista SQL sobre las predicciones).
+
+### 7. Sync automático de resultados (GitHub Actions)
+
+`.github/workflows/sync-resultados.yml` corre `sync_polla.py resultados --prod`
+cada 3 horas (cron) o manualmente desde la pestaña *Actions* del repo
+(*Run workflow*) — así no hace falta correrlo a mano en tu PC. Usa una copia
+vendorizada de `sofascore.py` en `sync/_vendor/` (el runner de GitHub no tiene
+acceso al monorepo local con `10-prediction/src`) y un navegador virtual
+(`xvfb`) porque `SofaScore` abre Chromium en modo visible.
+
+Requiere estos **Secrets** del repo (Settings → Secrets and variables →
+Actions), tomados de `.env.prod`:
+
+- `POLLA_SUPABASE_URL`
+- `POLLA_SUPABASE_KEY`
+
+Solo cubre resultados (no `fixture`, que sigue corriendo local porque depende
+de `predecir.py`, no vendorizado).
