@@ -79,6 +79,14 @@ st.html("""
 }
 .polla-medalla { font-size:1.3rem; width:1.8rem; text-align:center; }
 
+/* Columna del grupo que acertó el resultado real, en la revelación por
+   partido (agrupado local/empate/visita). [class*=] porque .st-key-<key>
+   se aplica al bloque interno del st.container, no al wrapper con borde. */
+[class*="st-key-grupo_correcto_"] {
+  border-color: var(--polla-accent) !important;
+  border-width: 2px !important;
+}
+
 @media (max-width: 640px) {
     .block-container { padding-left: 0.8rem; padding-right: 0.8rem; }
     div[data-testid="stNumberInput"] input { font-size: 1rem; padding: 0.5rem; }
@@ -396,13 +404,56 @@ def fila_estado_jugador(nombre, completo, es_yo):
         unsafe_allow_html=True)
 
 
-def fila_prediccion_jugador(nombre, gl_pred, gv_pred, puntos, es_exacto, es_yo):
-    clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
+def clasificar_resultado(gl, gv) -> str:
+    """'local' | 'empate' | 'visita' según los goles."""
+    if gl > gv:
+        return "local"
+    if gl < gv:
+        return "visita"
+    return "empate"
+
+
+def barra_reparto(n_local, n_empate, n_visita) -> str:
+    """Barra proporcional de a qué le fueron los 10 (no es semántica de
+    acierto/fallo — son 3 tintes del acento, distinto de las píldoras de
+    puntaje que sí usan verde/ámbar/rosa para exacto/1X2/fallo)."""
+    total = n_local + n_empate + n_visita
+    if total == 0:
+        return ""
+
+    def pct(n):
+        return round(100 * n / total)
+
+    return (
+        '<div style="display:flex; height:8px; border-radius:999px; overflow:hidden; '
+        'background:var(--polla-border); margin-bottom:10px;">'
+        f'<div style="width:{pct(n_local)}%; background:var(--polla-accent);"></div>'
+        f'<div style="width:{pct(n_empate)}%; background:#A9BDB0;"></div>'
+        f'<div style="width:{pct(n_visita)}%; background:#D8D4C8;"></div>'
+        '</div>'
+    )
+
+
+def fila_pronostico_grupo(nombre, gl_pred, gv_pred, es_exacto, es_yo):
+    """Fila dentro de una columna de grupo (local/empate/visita). No repite
+    la píldora de puntaje en cada fila — el grupo ya dice si acertaron el
+    resultado; solo se resalta quién, dentro del grupo, clavó el marcador
+    exacto."""
+    fondo = "background:var(--polla-exacto);" if es_exacto else ""
+    borde = "border-left:4px solid var(--polla-accent);" if es_yo else ""
+    peso = "700" if es_yo else "500"
+    check = (
+        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3E6A56" '
+        'stroke-width="3" stroke-linecap="round" stroke-linejoin="round" '
+        'style="flex-shrink:0"><path d="M20 6 9 17l-5-5"/></svg>'
+    ) if es_exacto else ""
     st.markdown(
-        f'<div class="{clase}">'
-        f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
-        f'<span style="margin-right:0.6rem; font-weight:600">{gl_pred}-{gv_pred}</span>'
-        f'{pill_puntos(puntos, es_exacto)}'
+        f'<div style="display:flex; align-items:center; gap:6px; padding:6px 8px; '
+        f'border-radius:6px; margin-bottom:2px; {fondo} {borde}">'
+        f'<span style="flex:1; font-size:13px; font-weight:{peso};">{nombre}</span>'
+        f'{check}'
+        f'<span style="font-variant-numeric:tabular-nums; font-weight:700; font-size:13px;">'
+        f'{gl_pred}-{gv_pred}</span>'
         f'</div>',
         unsafe_allow_html=True)
 
@@ -520,23 +571,61 @@ def vista_mis_predicciones():
     # nada — ver esto y luego editar la propia predicción sería copiarse.
     if fecha_totalmente_predicha(estado_jugadores):
         st.markdown("#### 🔓 Predicciones de todos — fecha completa")
-        partidos_ronda_full = (db().table("partidos").select("id, local, visita, kickoff")
+        partidos_ronda_full = (db().table("partidos")
+                                .select("id, local, visita, kickoff, gl_real, gv_real")
                                 .eq("fecha_ronda", ronda_sel).order("kickoff").execute().data)
         ids_ronda = [p["id"] for p in partidos_ronda_full]
         todas = (db().table("v_puntos")
-                 .select("jugador_id, partido_id, gl_pred, gv_pred, puntos, es_exacto, jugadores(nombre)")
+                 .select("jugador_id, partido_id, gl_pred, gv_pred, es_exacto, jugadores(nombre)")
                  .in_("partido_id", ids_ronda).execute().data)
         por_partido = {}
         for f in todas:
             por_partido.setdefault(f["partido_id"], []).append(f)
 
         for i, p in enumerate(partidos_ronda_full, start=1):
-            preds_partido = sorted(por_partido.get(p["id"], []), key=lambda f: f["jugadores"]["nombre"])
+            preds_partido = por_partido.get(p["id"], [])
+            grupos = {"local": [], "empate": [], "visita": []}
+            for f in preds_partido:
+                grupos[clasificar_resultado(f["gl_pred"], f["gv_pred"])].append(f)
+            for g in grupos.values():
+                g.sort(key=lambda f: f["jugadores"]["nombre"])
+
+            hay_resultado = p["gl_real"] is not None and p["gv_real"] is not None
+            resultado_real = clasificar_resultado(p["gl_real"], p["gv_real"]) if hay_resultado else None
+            etiquetas = {"local": p["local"], "empate": "Empate", "visita": p["visita"]}
+
             with st.expander(f"Partido {i}: {p['local']} vs {p['visita']}"):
-                for f in preds_partido:
-                    fila_prediccion_jugador(
-                        f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"], f["puntos"], f["es_exacto"],
-                        f["jugador_id"] == jugador_id)
+                if hay_resultado:
+                    st.caption(f"Resultado real: {p['gl_real']}-{p['gv_real']}")
+                st.markdown(
+                    barra_reparto(len(grupos["local"]), len(grupos["empate"]), len(grupos["visita"])),
+                    unsafe_allow_html=True)
+
+                cols = st.columns(3)
+                for col, tipo in zip(cols, ["local", "empate", "visita"]):
+                    with col:
+                        es_correcto = hay_resultado and tipo == resultado_real
+                        key = f"grupo_{'correcto' if es_correcto else 'otro'}_{p['id']}_{tipo}"
+                        with st.container(border=True, key=key):
+                            check = (
+                                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
+                                'stroke="#3E6A56" stroke-width="2.5" stroke-linecap="round" '
+                                'stroke-linejoin="round" style="vertical-align:-2px; margin-right:4px">'
+                                '<path d="M20 6 9 17l-5-5"/></svg>'
+                            ) if es_correcto else ""
+                            color_txt = "color:var(--polla-accent);" if es_correcto else "color:var(--polla-muted);"
+                            st.markdown(
+                                f'<div style="{color_txt} font-weight:700; font-size:12.5px; '
+                                f'margin-bottom:2px;">{check}{etiquetas[tipo]}</div>'
+                                f'<div style="font-size:20px; font-weight:800; {color_txt} '
+                                f'margin-bottom:8px;">{len(grupos[tipo])}</div>',
+                                unsafe_allow_html=True)
+                            if not grupos[tipo]:
+                                st.caption("Nadie")
+                            for f in grupos[tipo]:
+                                fila_pronostico_grupo(
+                                    f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"],
+                                    bool(f["es_exacto"]), f["jugador_id"] == jugador_id)
 
     st.markdown("#### Mis predicciones de esta fecha")
     filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda)")
