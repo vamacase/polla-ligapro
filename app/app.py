@@ -42,6 +42,23 @@ st.html("""
   border-radius: 0.75rem;
 }
 
+/* Fila compacta de pronóstico ("Opción A"): una línea corta por equipo
+   (escudo+nombre+su marcador) en vez de equipo arriba/input abajo por
+   separado — menos alto que la tarjeta vertical anterior. No se intenta
+   poner ambos equipos lado a lado: Streamlit apila st.columns en una sola
+   columna vertical bajo cierto ancho SIN importar cuántas haya (incluso
+   2, comprobado), y tampoco es fiable forzarlo por CSS porque Streamlit
+   recalcula el flex-flow de sus bloques por JS en cada resize. */
+[class*="st-key-card_partido_"] { padding-top:0.5rem !important; padding-bottom:0.5rem !important; }
+.polla-fila-hora { font-size:0.72rem; color:var(--polla-muted); }
+.polla-fila-equipo {
+  display:flex; align-items:center; gap:0.35rem;
+  font-size:0.8em; color:var(--polla-text); font-weight:600;
+  overflow:hidden; min-width:0; margin-top:0.3rem;
+}
+.polla-fila-equipo span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.polla-fila-equipo img { flex-shrink:0; }
+
 .polla-equipo { text-align:center; min-height:4.6rem; }
 .polla-equipo img { display:block; margin:0 auto; }
 .polla-equipo span { font-size:0.82em; color:var(--polla-text); }
@@ -272,34 +289,36 @@ def cargar_predicciones(jugador_id):
 
 
 def tarjeta_partido(p, mis_pred):
+    """Fila compacta: hora+badge, luego una línea corta por equipo (escudo +
+    nombre + su marcador). Streamlit apila st.columns en una sola columna
+    vertical bajo cierto ancho SIN importar cuántas haya (incluso 2,
+    comprobado) — forzar layout horizontal vía CSS no es fiable porque
+    Streamlit recalcula el flex-flow de sus bloques por JS en cada resize.
+    Por eso cada equipo va en su propia línea (más compacta que la tarjeta
+    anterior: equipo+goles comparten línea en vez de equipo arriba/input
+    abajo por separado)."""
     existente = mis_pred.get(p["id"])
     with st.container(border=True, key=f"card_partido_{p['id']}"):
         kickoff_local = a_local(p["kickoff"]).strftime("%a %d/%m %H:%M")
         c_info, c_badge = st.columns([2, 1])
         with c_info:
-            st.caption(kickoff_local)
+            st.markdown(f'<div class="polla-fila-hora">{kickoff_local}</div>', unsafe_allow_html=True)
         with c_badge:
             st.markdown(badge_cuenta_regresiva(p["kickoff"]), unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns([2, 1, 2])
-        with c1:
-            st.markdown(
-                f'<div class="polla-equipo">{logo(p.get("local_id"), 40)}<br>'
-                f'<span>{p["local"]}</span></div>',
-                unsafe_allow_html=True)
-            gl = st.number_input("Goles", min_value=0, max_value=15, step=1,
-                                  value=existente["gl_pred"] if existente else 0,
-                                  key=f"gl_{p['id']}", label_visibility="collapsed")
-        with c2:
-            st.markdown('<div class="polla-vs">—</div>', unsafe_allow_html=True)
-        with c3:
-            st.markdown(
-                f'<div class="polla-equipo">{logo(p.get("visita_id"), 40)}<br>'
-                f'<span>{p["visita"]}</span></div>',
-                unsafe_allow_html=True)
-            gv = st.number_input("Goles", min_value=0, max_value=15, step=1,
-                                  value=existente["gv_pred"] if existente else 0,
-                                  key=f"gv_{p['id']}", label_visibility="collapsed")
+        st.markdown(
+            f'<div class="polla-fila-equipo">{logo(p.get("local_id"), 22)}<span>{p["local"]}</span></div>',
+            unsafe_allow_html=True)
+        gl = st.number_input("Goles", min_value=0, max_value=15, step=1,
+                              value=existente["gl_pred"] if existente else 0,
+                              key=f"gl_{p['id']}", label_visibility="collapsed")
+
+        st.markdown(
+            f'<div class="polla-fila-equipo">{logo(p.get("visita_id"), 22)}<span>{p["visita"]}</span></div>',
+            unsafe_allow_html=True)
+        gv = st.number_input("Goles", min_value=0, max_value=15, step=1,
+                              value=existente["gv_pred"] if existente else 0,
+                              key=f"gv_{p['id']}", label_visibility="collapsed")
     return gl, gv
 
 
