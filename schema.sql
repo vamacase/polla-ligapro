@@ -44,7 +44,10 @@ create table if not exists predicciones (
     unique (jugador_id, partido_id)
 );
 
--- Vista de puntaje por predicción: 3 = marcador exacto, 1 = acierta 1X2, 0 = falla
+-- Vista de puntaje por predicción: 1 = acierta el resultado (exacto o solo
+-- 1X2, valen lo mismo), 0 = falla. es_exacto se guarda aparte (no afecta el
+-- puntaje) para desempate en el ranking y para que la app muestre cuál fue
+-- marcador exacto vs. solo 1X2.
 create or replace view v_puntos as
 select
     p.id as prediccion_id,
@@ -53,10 +56,14 @@ select
     pa.gl_real, pa.gv_real, p.gl_pred, p.gv_pred,
     case
         when pa.gl_real is null or pa.gv_real is null then null
-        when p.gl_pred = pa.gl_real and p.gv_pred = pa.gv_real then 3
+        when p.gl_pred = pa.gl_real and p.gv_pred = pa.gv_real then 1
         when sign(p.gl_pred - p.gv_pred) = sign(pa.gl_real - pa.gv_real) then 1
         else 0
-    end as puntos
+    end as puntos,
+    case
+        when pa.gl_real is null or pa.gv_real is null then null
+        else (p.gl_pred = pa.gl_real and p.gv_pred = pa.gv_real)
+    end as es_exacto
 from predicciones p
 join partidos pa on pa.id = p.partido_id;
 
@@ -67,7 +74,7 @@ select
     j.nombre,
     coalesce(sum(vp.puntos), 0) as puntos_totales,
     count(vp.puntos) filter (where vp.puntos is not null) as partidos_predichos,
-    count(vp.puntos) filter (where vp.puntos = 3) as aciertos_exactos
+    count(vp.puntos) filter (where vp.es_exacto) as aciertos_exactos
 from jugadores j
 left join v_puntos vp on vp.jugador_id = j.id
 group by j.id, j.nombre

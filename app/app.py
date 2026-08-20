@@ -63,9 +63,9 @@ st.html("""
   display:inline-block; padding:0.2rem 0.7rem; border-radius:999px;
   font-weight:700; font-size:0.9rem; color:#2F3E38;
 }
-.polla-pill--3 { background:var(--polla-exacto); }
-.polla-pill--1 { background:var(--polla-1x2); }
-.polla-pill--0 { background:var(--polla-fallo); }
+.polla-pill--exacto { background:var(--polla-exacto); }
+.polla-pill--1x2 { background:var(--polla-1x2); }
+.polla-pill--fallo { background:var(--polla-fallo); }
 .polla-pill--na { background:#E3E3DA; color:var(--polla-muted); }
 
 .polla-rank-row {
@@ -157,13 +157,18 @@ def badge_cuenta_regresiva(kickoff, ahora=None) -> str:
     return f'<span class="{clase}">{texto}</span>'
 
 
-def pill_puntos(puntos) -> str:
+def pill_puntos(puntos, es_exacto=None) -> str:
+    """Marcador exacto y acierto de solo 1X2 valen lo mismo (1pt), pero se
+    distinguen visualmente — es_exacto viene de la vista v_puntos."""
     if puntos is None:
         return '<span class="polla-pill polla-pill--na">Pendiente</span>'
-    etiquetas = {3: "Exacto", 1: "1X2", 0: "Fallo"}
-    clase = f"polla-pill--{puntos}" if puntos in etiquetas else "polla-pill--na"
-    texto = etiquetas.get(puntos, "—")
-    return f'<span class="polla-pill {clase}">{texto}</span>'
+    if puntos == 1 and es_exacto:
+        return '<span class="polla-pill polla-pill--exacto">Exacto</span>'
+    if puntos == 1:
+        return '<span class="polla-pill polla-pill--1x2">1X2</span>'
+    if puntos == 0:
+        return '<span class="polla-pill polla-pill--fallo">Fallo</span>'
+    return '<span class="polla-pill polla-pill--na">—</span>'
 
 
 def selector_fecha(rondas, key, label="Selecciona la fecha"):
@@ -314,7 +319,7 @@ def vista_predicciones():
         return
 
     mis_pred = cargar_predicciones(jugador_id)
-    st.caption("Predice el marcador exacto. 3 pts si aciertas el marcador, 1 pt si aciertas el resultado (1X2), 0 si fallas.")
+    st.caption("Predice el marcador. 1 pt si aciertas el resultado (exacto o solo 1X2), 0 si fallas.")
 
     rondas = sorted({p["fecha_ronda"] for p in partidos}, key=lambda r: (r is None, r))
     ronda_sel = selector_fecha(rondas, key="ronda_pred")
@@ -391,13 +396,13 @@ def fila_estado_jugador(nombre, completo, es_yo):
         unsafe_allow_html=True)
 
 
-def fila_prediccion_jugador(nombre, gl_pred, gv_pred, puntos, es_yo):
+def fila_prediccion_jugador(nombre, gl_pred, gv_pred, puntos, es_exacto, es_yo):
     clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
     st.markdown(
         f'<div class="{clase}">'
         f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
         f'<span style="margin-right:0.6rem; font-weight:600">{gl_pred}-{gv_pred}</span>'
-        f'{pill_puntos(puntos)}'
+        f'{pill_puntos(puntos, es_exacto)}'
         f'</div>',
         unsafe_allow_html=True)
 
@@ -422,7 +427,7 @@ def vista_ranking():
     ids_partidos = [p["id"] for p in partidos if p["fecha_ronda"] is not None and ini <= p["fecha_ronda"] <= fin]
     puntos_filas = []
     if ids_partidos:
-        puntos_filas = (db().table("v_puntos").select("jugador_id, puntos")
+        puntos_filas = (db().table("v_puntos").select("jugador_id, puntos, es_exacto")
                          .in_("partido_id", ids_partidos).not_.is_("puntos", "null")
                          .execute().data)
 
@@ -431,7 +436,7 @@ def vista_ranking():
         jid = f["jugador_id"]
         acc = agregados.setdefault(jid, {"puntos_totales": 0, "aciertos_exactos": 0, "partidos_predichos": 0})
         acc["puntos_totales"] += f["puntos"]
-        acc["aciertos_exactos"] += 1 if f["puntos"] == 3 else 0
+        acc["aciertos_exactos"] += 1 if f["es_exacto"] else 0
         acc["partidos_predichos"] += 1
 
     ranking = []
@@ -519,7 +524,7 @@ def vista_mis_predicciones():
                                 .eq("fecha_ronda", ronda_sel).order("kickoff").execute().data)
         ids_ronda = [p["id"] for p in partidos_ronda_full]
         todas = (db().table("v_puntos")
-                 .select("jugador_id, partido_id, gl_pred, gv_pred, puntos, jugadores(nombre)")
+                 .select("jugador_id, partido_id, gl_pred, gv_pred, puntos, es_exacto, jugadores(nombre)")
                  .in_("partido_id", ids_ronda).execute().data)
         por_partido = {}
         for f in todas:
@@ -530,7 +535,7 @@ def vista_mis_predicciones():
             with st.expander(f"Partido {i}: {p['local']} vs {p['visita']}"):
                 for f in preds_partido:
                     fila_prediccion_jugador(
-                        f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"], f["puntos"],
+                        f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"], f["puntos"], f["es_exacto"],
                         f["jugador_id"] == jugador_id)
 
     st.markdown("#### Mis predicciones de esta fecha")
@@ -562,7 +567,7 @@ def vista_mis_predicciones():
                     f"<span style='color:var(--polla-muted); font-size:0.85em'>{detalle}</span>",
                     unsafe_allow_html=True)
             with c2:
-                st.markdown(pill_puntos(f["puntos"]), unsafe_allow_html=True)
+                st.markdown(pill_puntos(f["puntos"], f["es_exacto"]), unsafe_allow_html=True)
 
 
 def vista_admin():
