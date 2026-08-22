@@ -12,8 +12,18 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
 from email_notif import enviar_confirmacion, enviar_todos_predijeron  # noqa: E402
+from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
+
+DIAS_SESION = 30
+
+
+def cookies():
+    # CookieController cachea internamente en st.session_state["cookies"],
+    # así que basta con construirlo cada vez (no es costoso: no repite la
+    # llamada al componente JS mientras esa key siga en session_state).
+    return CookieController()
 
 TZ_EC = "America/Guayaquil"
 LIGA_ID = 240  # unique-tournament de LigaPro Ecuador en SofaScore; también la
@@ -309,6 +319,8 @@ def login():
             if fila and str(fila["pin"]) == pin:
                 st.session_state["jugador_id"] = fila["id"]
                 st.session_state["jugador_nombre"] = nombre
+                cookies().set("polla_jugador_id", str(fila["id"]),
+                               max_age=DIAS_SESION * 24 * 3600)
                 st.rerun()
             else:
                 st.error("PIN incorrecto.")
@@ -811,7 +823,21 @@ def vista_admin():
         st.rerun()
 
 
+def restaurar_sesion_desde_cookie():
+    """Si el navegador trae la cookie de sesión (dura DIAS_SESION), reingresa
+    al jugador sin pedirle PIN otra vez — evita re-login en cada visita."""
+    jugador_id = cookies().get("polla_jugador_id")
+    if not jugador_id:
+        return
+    fila = db().table("jugadores").select("id, nombre").eq("id", jugador_id).execute().data
+    if fila:
+        st.session_state["jugador_id"] = fila[0]["id"]
+        st.session_state["jugador_nombre"] = fila[0]["nombre"]
+
+
 def main():
+    if "jugador_id" not in st.session_state:
+        restaurar_sesion_desde_cookie()
     if "jugador_id" not in st.session_state:
         login()
         return
@@ -839,6 +865,7 @@ def main():
             del st.session_state["jugador_id"]
             del st.session_state["jugador_nombre"]
             st.session_state.pop("es_admin", None)
+            cookies().remove("polla_jugador_id")
             st.rerun()
 
         if not es_admin:

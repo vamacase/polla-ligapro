@@ -3,3 +3,4 @@ supabase>=2.31,<3
 python-dotenv>=1.0
 pandas>=2.2,<3
 tzdata; sys_platform == "linux"
+streamlit-cookies-controller>=0.0.4,<0.1
