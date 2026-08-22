@@ -834,6 +834,14 @@ def restaurar_sesion_desde_cookie():
 def main():
     if "jugador_id" not in st.session_state:
         restaurar_sesion_desde_cookie()
+        if "jugador_id" not in st.session_state and "_cookie_check_hecho" not in st.session_state:
+            # El componente de cookies resuelve su valor real de forma
+            # asíncrona (rerun automático de Streamlit) — en el primer
+            # render de una sesión nueva puede devolver vacío aunque la
+            # cookie exista en el navegador. Se da un respiro de un rerun
+            # antes de asumir "no hay sesión" y mostrar el login.
+            st.session_state["_cookie_check_hecho"] = True
+            st.rerun()
     if "jugador_id" not in st.session_state:
         login()
         return
