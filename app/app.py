@@ -23,6 +23,10 @@ def cookies():
     # CookieController cachea internamente en st.session_state["cookies"],
     # así que basta con construirlo cada vez (no es costoso: no repite la
     # llamada al componente JS mientras esa key siga en session_state).
+    # En algunos reruns el componente puede dejar ese cache en None en vez
+    # de {} — se limpia antes de instanciar para no romper get()/set().
+    if st.session_state.get("cookies") is None:
+        st.session_state.pop("cookies", None)
     return CookieController()
 
 TZ_EC = "America/Guayaquil"
@@ -822,7 +826,13 @@ def vista_admin():
 def restaurar_sesion_desde_cookie():
     """Si el navegador trae la cookie de sesión (dura DIAS_SESION), reingresa
     al jugador sin pedirle PIN otra vez — evita re-login en cada visita."""
-    jugador_id = cookies().get("polla_jugador_id")
+    try:
+        jugador_id = cookies().get("polla_jugador_id")
+    except TypeError:
+        # El componente de cookies aún no resolvió su valor real en este
+        # rerun (queda None en vez de {} de forma transitoria) — se
+        # intenta de nuevo en el siguiente rerun natural de Streamlit.
+        return
     if not jugador_id:
         return
     fila = db().table("jugadores").select("id, nombre").eq("id", jugador_id).execute().data
@@ -834,14 +844,6 @@ def restaurar_sesion_desde_cookie():
 def main():
     if "jugador_id" not in st.session_state:
         restaurar_sesion_desde_cookie()
-        if "jugador_id" not in st.session_state and "_cookie_check_hecho" not in st.session_state:
-            # El componente de cookies resuelve su valor real de forma
-            # asíncrona (rerun automático de Streamlit) — en el primer
-            # render de una sesión nueva puede devolver vacío aunque la
-            # cookie exista en el navegador. Se da un respiro de un rerun
-            # antes de asumir "no hay sesión" y mostrar el login.
-            st.session_state["_cookie_check_hecho"] = True
-            st.rerun()
     if "jugador_id" not in st.session_state:
         login()
         return
