@@ -26,6 +26,8 @@ jobs:
           cat <<EOF > .env.prod
           SUPABASE_URL=${{ secrets.POLLA_SUPABASE_URL }}
           SUPABASE_KEY=${{ secrets.POLLA_SUPABASE_KEY }}
+          GMAIL_USER=${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
           EOF
 
       - name: Sincronizar resultados
