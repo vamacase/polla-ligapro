@@ -575,12 +575,19 @@ def vista_ranking():
         filas_tabla.append({
             "Puesto": medallas.get(i, f"#{i}"),
             "Jugador": nombre,
-            "Puntos": f"🎯 {fila['puntos_totales']}",
-            "Marcadores exactos": f"✅ {fila['aciertos_exactos']}",
-            "Partidos predichos": f"⚽ {fila['partidos_predichos']}",
+            "Pts": fila["puntos_totales"],
+            "Exactos": fila["aciertos_exactos"],
+            "Jugados": fila["partidos_predichos"],
         })
     dfr = pd.DataFrame(filas_tabla)
-    st.dataframe(dfr, width="stretch", hide_index=True)
+    st.dataframe(
+        dfr, width="stretch", hide_index=True,
+        column_config={
+            "Puesto": st.column_config.TextColumn(width="small"),
+            "Pts": st.column_config.NumberColumn(width="small"),
+            "Exactos": st.column_config.NumberColumn(width="small"),
+            "Jugados": st.column_config.NumberColumn(width="small"),
+        })
 
 
 def vista_resultados():
