@@ -464,20 +464,6 @@ def vista_predicciones():
             st.rerun()
 
 
-def fila_ranking(i, fila, es_yo):
-    medallas = {1: "🥇", 2: "🥈", 3: "🥉"}
-    medalla = medallas.get(i, f"#{i}")
-    clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
-    st.markdown(
-        f'<div class="{clase}">'
-        f'<span class="polla-medalla">{medalla}</span>'
-        f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{fila["nombre"]}</span>'
-        f'<span style="font-size:0.85em; color:var(--polla-muted)">{fila["aciertos_exactos"]} exactos · {fila["partidos_predichos"]} jugados</span>'
-        f'<span style="font-weight:700; font-size:1.1em; margin-left:0.6rem">{fila["puntos_totales"]} pts</span>'
-        f'</div>',
-        unsafe_allow_html=True)
-
-
 def fila_estado_jugador(nombre, completo, es_yo):
     icono = "✅" if completo else "⏳"
     clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
@@ -582,16 +568,19 @@ def vista_ranking():
     ranking.sort(key=lambda r: (-r["puntos_totales"], -r["aciertos_exactos"]))
 
     mi_id = st.session_state.get("jugador_id")
+    medallas = {1: "🥇", 2: "🥈", 3: "🥉"}
+    filas_tabla = []
     for i, fila in enumerate(ranking, start=1):
-        fila_ranking(i, fila, fila["jugador_id"] == mi_id)
-
-    with st.expander("Ver tabla completa"):
-        dfr = pd.DataFrame(ranking).rename(columns={
-            "nombre": "Jugador", "puntos_totales": "Puntos",
-            "partidos_predichos": "Partidos predichos", "aciertos_exactos": "Marcadores exactos",
-        })[["Jugador", "Puntos", "Marcadores exactos", "Partidos predichos"]]
-        dfr.index = range(1, len(dfr) + 1)
-        st.dataframe(dfr, width="stretch")
+        nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
+        filas_tabla.append({
+            "Puesto": medallas.get(i, f"#{i}"),
+            "Jugador": nombre,
+            "Puntos": f"🎯 {fila['puntos_totales']}",
+            "Marcadores exactos": f"✅ {fila['aciertos_exactos']}",
+            "Partidos predichos": f"⚽ {fila['partidos_predichos']}",
+        })
+    dfr = pd.DataFrame(filas_tabla)
+    st.dataframe(dfr, width="stretch", hide_index=True)
 
 
 def vista_resultados():
