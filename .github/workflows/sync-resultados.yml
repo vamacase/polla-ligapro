@@ -1,8 +1,12 @@
 name: Sync resultados Polla
 
+# El cron automático se deshabilitó: SofaScore/Cloudflare bloquea (devuelve
+# 0 resultados, sin error) las IPs de datacenter de GitHub Actions con más
+# frecuencia que una IP residencial. El sync ahora corre cada 3h desde una
+# tarea programada en la PC de Vicente (Task Scheduler, tarea
+# "PollaLigaPro_SyncResultados") — este workflow queda solo para disparo
+# manual ocasional (workflow_dispatch), sabiendo que puede fallar igual.
 on:
-  schedule:
-    - cron: "0 */3 * * *"
   workflow_dispatch: {}
 
 jobs:
