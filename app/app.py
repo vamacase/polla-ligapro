@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
-from email_notif import enviar_confirmacion  # noqa: E402
+from email_notif import enviar_confirmacion, enviar_todos_predijeron  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
 
@@ -239,6 +239,46 @@ def fecha_totalmente_predicha(estado_jugadores) -> bool:
     return bool(estado_jugadores) and all(e["total"] > 0 and e["n"] >= e["total"] for e in estado_jugadores)
 
 
+def intentar_notificar_todos_predijeron(ronda):
+    """Si la fecha se acaba de completar (todos predijeron), manda el correo
+    de revelación a los 10 — una sola vez por fecha. El insert en
+    notificaciones_enviadas (unique fecha_ronda+tipo) actúa como candado:
+    si dos jugadores completan casi al mismo tiempo, solo el primer insert
+    exitoso dispara el envío; el segundo choca con la unique constraint y
+    no reenvía."""
+    try:
+        db().table("notificaciones_enviadas").insert(
+            {"fecha_ronda": ronda, "tipo": "todos_predijeron"}).execute()
+    except Exception:
+        return  # ya se envió (o falló el insert por otra razón) — no reintentar
+
+    partidos_ronda = (db().table("partidos").select("id, local, visita")
+                       .eq("fecha_ronda", ronda).order("kickoff").execute().data)
+    ids_ronda = [p["id"] for p in partidos_ronda]
+    todas = (db().table("v_puntos")
+             .select("partido_id, gl_pred, gv_pred, es_exacto, jugadores(nombre)")
+             .in_("partido_id", ids_ronda).execute().data)
+    por_partido = {}
+    for f in todas:
+        por_partido.setdefault(f["partido_id"], []).append(f)
+
+    cuerpo = []
+    for p in partidos_ronda:
+        grupos = {"local": [], "empate": [], "visita": []}
+        for f in por_partido.get(p["id"], []):
+            grupos[clasificar_resultado(f["gl_pred"], f["gv_pred"])].append({
+                "nombre": f["jugadores"]["nombre"], "gl": f["gl_pred"], "gv": f["gv_pred"],
+                "es_exacto": bool(f["es_exacto"]),
+            })
+        for g in grupos.values():
+            g.sort(key=lambda x: x["nombre"])
+        cuerpo.append({"local": p["local"], "visita": p["visita"], "grupos": grupos})
+
+    destinatarios = [j["email"] for j in db().table("jugadores").select("email").execute().data if j["email"]]
+    if destinatarios:
+        enviar_todos_predijeron(destinatarios, ronda, cuerpo)
+
+
 def get_admin_pin():
     pin = os.environ.get("ADMIN_PIN")
     if not pin:
@@ -403,6 +443,8 @@ def vista_predicciones():
                 if jugador and jugador.get("email"):
                     enviar_confirmacion(
                         jugador["email"], st.session_state["jugador_nombre"], ronda_sel, confirmadas)
+                if fecha_totalmente_predicha(calcular_estado_prediccion(ronda_sel)):
+                    intentar_notificar_todos_predijeron(ronda_sel)
 
             st.session_state["mensaje_guardado"] = (guardados, rechazados)
             st.rerun()

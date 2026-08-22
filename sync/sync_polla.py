@@ -33,6 +33,17 @@ print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV
 
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
 from db import get_client  # noqa: E402
+from email_notif import enviar_fecha_terminada  # noqa: E402
+
+
+def numero_polla(ronda: int) -> int:
+    """Misma agrupación que usa la app (Reglamento Polla Papers: 5 fechas por polla)."""
+    return (ronda - 1) // 5 + 1
+
+
+def rango_polla(numero: int) -> tuple[int, int]:
+    inicio = (numero - 1) * 5 + 1
+    return inicio, inicio + 4
 
 
 def sync_fixture(anio=2026, max_partidos=10, ronda=None):
@@ -98,6 +109,76 @@ def sync_resultados(anio=2026):
     print(f"\n{actualizados} partidos actualizados con resultado real.")
 
 
+def _hora_ecuador(kickoff_iso: str) -> str:
+    """Ecuador no tiene horario de verano, así que el offset fijo -5h siempre
+    es correcto — evita depender de tzdata en el runner de CI (igual que
+    a_local() en app.py, pero sin pandas/tzdata como camino principal)."""
+    import pandas as pd
+    from datetime import timezone, timedelta
+    t = pd.to_datetime(kickoff_iso)
+    return t.tz_convert(timezone(timedelta(hours=-5))).strftime("%a %d/%m")
+
+
+def notificar_fechas_terminadas():
+    """Manda el correo de resultados+tabla a las fechas que se acaban de
+    completar (todos sus partidos ya tienen resultado real) y aún no fueron
+    notificadas. Se corre después de sync_resultados() en cada ejecución del
+    workflow — así no depende de que alguien abra la app."""
+    db = get_client()
+    partidos = (db.table("partidos")
+                .select("id, fecha_ronda, kickoff, local, visita, gl_real, gv_real").execute().data)
+    por_ronda = {}
+    for p in partidos:
+        if p["fecha_ronda"] is not None:
+            por_ronda.setdefault(p["fecha_ronda"], []).append(p)
+
+    ya_notificadas = {
+        n["fecha_ronda"] for n in
+        db.table("notificaciones_enviadas").select("fecha_ronda").eq("tipo", "fecha_terminada").execute().data
+    }
+
+    for ronda, partidos_ronda in por_ronda.items():
+        if ronda in ya_notificadas:
+            continue
+        if not partidos_ronda or any(p["gl_real"] is None for p in partidos_ronda):
+            continue  # fecha aún no completa
+
+        try:
+            db.table("notificaciones_enviadas").insert(
+                {"fecha_ronda": ronda, "tipo": "fecha_terminada"}).execute()
+        except Exception:
+            continue  # ya notificada por otra corrida en paralelo — no reenviar
+
+        resultados = sorted(
+            [{"local": p["local"], "visita": p["visita"], "gl": p["gl_real"], "gv": p["gv_real"],
+              "fecha": _hora_ecuador(p["kickoff"])}
+             for p in partidos_ronda],
+            key=lambda r: r["local"])
+
+        ini, fin = rango_polla(numero_polla(ronda))
+        ids_polla = [p["id"] for p in partidos if p["fecha_ronda"] is not None and ini <= p["fecha_ronda"] <= fin]
+        puntos_filas = (db.table("v_puntos").select("jugador_id, puntos, es_exacto")
+                         .in_("partido_id", ids_polla).not_.is_("puntos", "null").execute().data
+                         if ids_polla else [])
+        agregados = {}
+        for f in puntos_filas:
+            acc = agregados.setdefault(f["jugador_id"], {"puntos": 0, "exactos": 0, "jugados": 0})
+            acc["puntos"] += f["puntos"]
+            acc["exactos"] += 1 if f["es_exacto"] else 0
+            acc["jugados"] += 1
+
+        jugadores = db.table("jugadores").select("id, nombre, email").execute().data
+        ranking = sorted(
+            [{"nombre": j["nombre"], **agregados.get(j["id"], {"puntos": 0, "exactos": 0, "jugados": 0})}
+             for j in jugadores],
+            key=lambda r: (-r["puntos"], -r["exactos"]))
+
+        destinatarios = [j["email"] for j in jugadores if j["email"]]
+        if destinatarios:
+            enviar_fecha_terminada(destinatarios, ronda, resultados, ranking)
+            print(f"  [ok] correo de fecha terminada enviado — Fecha {ronda}")
+
+
 def sync_logos():
     """Descarga y cachea escudos de equipo + logo de la liga (base64) en Supabase.
 
@@ -159,6 +240,7 @@ if __name__ == "__main__":
     elif modo == "resultados":
         sync_resultados()
         cerrar_por_kickoff()
+        notificar_fechas_terminadas()
     elif modo == "cerrar":
         cerrar_por_kickoff()
     elif modo == "logos":

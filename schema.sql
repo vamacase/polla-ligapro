@@ -45,6 +45,17 @@ create table if not exists predicciones (
     unique (jugador_id, partido_id)
 );
 
+-- Registro de correos masivos ya enviados por fecha, para no reenviarlos si
+-- el workflow de sync corre varias veces o dos jugadores disparan el mismo
+-- evento casi al mismo tiempo (ej. "todos predijeron" al guardar el último).
+create table if not exists notificaciones_enviadas (
+    id serial primary key,
+    fecha_ronda int not null,
+    tipo text not null,  -- 'todos_predijeron' | 'fecha_terminada'
+    enviado_en timestamptz not null default now(),
+    unique (fecha_ronda, tipo)
+);
+
 -- Vista de puntaje por predicción: 1 = acierta el resultado (exacto o solo
 -- 1X2, valen lo mismo), 0 = falla. es_exacto se guarda aparte (no afecta el
 -- puntaje) para desempate en el ranking y para que la app muestre cuál fue
@@ -88,6 +99,7 @@ alter table jugadores enable row level security;
 alter table partidos enable row level security;
 alter table equipos enable row level security;
 alter table predicciones enable row level security;
+alter table notificaciones_enviadas enable row level security;
 
 drop policy if exists jugadores_all on jugadores;
 create policy jugadores_all on jugadores for all using (true) with check (true);
@@ -100,3 +112,6 @@ create policy equipos_all on equipos for all using (true) with check (true);
 
 drop policy if exists predicciones_all on predicciones;
 create policy predicciones_all on predicciones for all using (true) with check (true);
+
+drop policy if exists notificaciones_enviadas_all on notificaciones_enviadas;
+create policy notificaciones_enviadas_all on notificaciones_enviadas for all using (true) with check (true);
