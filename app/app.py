@@ -197,9 +197,11 @@ def pill_puntos(puntos, es_exacto=None) -> str:
     return '<span class="polla-pill polla-pill--na">—</span>'
 
 
-def selector_fecha(rondas, key, label="Selecciona la fecha"):
+def selector_fecha(rondas, key, label="Selecciona la fecha", ronda_defecto=None):
     opciones = [f"Fecha {r}" if r is not None else "Fecha sin definir" for r in rondas]
-    idx = st.selectbox(label, range(len(rondas)), format_func=lambda i: opciones[i], key=key)
+    idx_defecto = rondas.index(ronda_defecto) if ronda_defecto in rondas else 0
+    idx = st.selectbox(label, range(len(rondas)), format_func=lambda i: opciones[i],
+                        index=idx_defecto, key=key)
     return rondas[idx]
 
 
@@ -621,12 +623,19 @@ def vista_mis_predicciones():
     # en los que el jugador actual ya predijo — si no, alguien que aún no
     # predice nada en una fecha ni siquiera podría seleccionarla para ver
     # el checklist de quién sí lo hizo.
-    partidos_todos = db().table("partidos").select("fecha_ronda").execute().data
+    partidos_todos = db().table("partidos").select("fecha_ronda, cerrado").execute().data
     rondas = sorted({p["fecha_ronda"] for p in partidos_todos if p["fecha_ronda"] is not None}, reverse=True)
     if not rondas:
         st.info("Todavía no hay partidos cargados.")
         return
-    ronda_sel = selector_fecha(rondas, key="ronda_mis_pred")
+
+    # Por defecto, la fecha "actual" es la más próxima que todavía tiene
+    # partidos sin cerrar (la que se está jugando/por jugar) — no la más
+    # alta cargada, que puede ser una fecha futura recién subida al fixture.
+    rondas_abiertas = sorted({p["fecha_ronda"] for p in partidos_todos
+                               if p["fecha_ronda"] is not None and not p["cerrado"]})
+    ronda_actual = rondas_abiertas[0] if rondas_abiertas else rondas[0]
+    ronda_sel = selector_fecha(rondas, key="ronda_mis_pred", ronda_defecto=ronda_actual)
 
     # Checklist de quién ya predijo esta fecha: solo el estado (✅/⏳), nunca
     # el marcador que cada quien puso — eso arruinaría la apuesta antes de
