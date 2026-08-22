@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
+from email_notif import enviar_confirmacion  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
 
@@ -383,6 +384,7 @@ def vista_predicciones():
                        .in_("id", ids).execute().data}
             ahora = datetime.now(timezone.utc)
             guardados, rechazados = 0, []
+            confirmadas = []
             for partido_id, (gl, gv) in valores.items():
                 p = frescos.get(partido_id)
                 if not p or p["cerrado"] or pd.to_datetime(p["kickoff"]) <= ahora:
@@ -394,6 +396,14 @@ def vista_predicciones():
                     "actualizado_en": ahora.isoformat(),
                 }, on_conflict="jugador_id,partido_id").execute()
                 guardados += 1
+                confirmadas.append({"local": p["local"], "visita": p["visita"], "gl": int(gl), "gv": int(gv)})
+
+            if confirmadas:
+                jugador = db().table("jugadores").select("email").eq("id", jugador_id).single().execute().data
+                if jugador and jugador.get("email"):
+                    enviar_confirmacion(
+                        jugador["email"], st.session_state["jugador_nombre"], ronda_sel, confirmadas)
+
             st.session_state["mensaje_guardado"] = (guardados, rechazados)
             st.rerun()
 
@@ -681,7 +691,7 @@ def vista_mis_predicciones():
 def vista_admin():
     st.subheader("🛠️ Panel de Administrador")
 
-    jugadores = db().table("jugadores").select("id, nombre, pin").order("nombre").execute().data
+    jugadores = db().table("jugadores").select("id, nombre, pin, email").order("nombre").execute().data
     partidos = db().table("partidos").select("*").order("kickoff").execute().data
 
     if not partidos:
@@ -735,6 +745,19 @@ def vista_admin():
     st.markdown("#### Lista de jugadores")
     st.dataframe(pd.DataFrame([{"Jugador": j["nombre"], "PIN": j["pin"]} for j in jugadores]),
                  width="stretch", hide_index=True)
+
+    st.markdown("#### Correos para confirmación de predicciones")
+    st.caption("Deja vacío el correo de quien no quiera recibir confirmación por email.")
+    df_emails = pd.DataFrame([{"id": j["id"], "Jugador": j["nombre"], "Email": j["email"] or ""}
+                               for j in jugadores])
+    editado = st.data_editor(
+        df_emails, width="stretch", hide_index=True, key="editor_emails",
+        column_config={"id": None, "Jugador": st.column_config.TextColumn(disabled=True)})
+    if st.button("Guardar correos"):
+        for _, fila in editado.iterrows():
+            db().table("jugadores").update({"email": fila["Email"].strip() or None}).eq("id", fila["id"]).execute()
+        st.success("Correos actualizados.")
+        st.rerun()
 
 
 def main():

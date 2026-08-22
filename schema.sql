@@ -4,7 +4,8 @@
 create table if not exists jugadores (
     id serial primary key,
     nombre text unique not null,
-    pin text not null  -- 4 dígitos, texto para simplicidad
+    pin text not null,  -- 4 dígitos, texto para simplicidad
+    email text  -- opcional: para enviar confirmación de predicciones por correo
 );
 
 create table if not exists partidos (
