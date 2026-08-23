@@ -576,15 +576,15 @@ def vista_ranking():
 
     mi_id = st.session_state.get("jugador_id")
     medallas = {1: "🥇", 2: "🥈", 3: "🥉"}
-    COL_EXACTO = "Ptos Resultado\nExacto"
-    COL_1X2 = "Ptos Resultado\nGana/Empata/Pierde"
+    COL_EXACTO = "Exacto"
+    COL_1X2 = "G/E/P"
     filas_tabla = []
     for i, fila in enumerate(ranking, start=1):
         nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
         filas_tabla.append({
             "Puesto": medallas.get(i, f"#{i}"),
             "Jugador": nombre,
-            "Puntos Totales": fila["puntos_totales"],
+            "Ptos": fila["puntos_totales"],
             COL_EXACTO: fila["aciertos_exactos"],
             COL_1X2: fila["aciertos_1x2"],
         })
@@ -593,9 +593,10 @@ def vista_ranking():
         dfr, width="stretch", hide_index=True,
         column_config={
             "Puesto": st.column_config.TextColumn(width="small"),
-            "Puntos Totales": st.column_config.NumberColumn(width="small"),
-            COL_EXACTO: st.column_config.NumberColumn(width="small"),
-            COL_1X2: st.column_config.NumberColumn(width="small"),
+            "Jugador": st.column_config.TextColumn(width="medium"),
+            "Ptos": st.column_config.NumberColumn(width="small"),
+            COL_EXACTO: st.column_config.NumberColumn(width="small", help="Puntos por resultado exacto"),
+            COL_1X2: st.column_config.NumberColumn(width="small", help="Puntos por acertar Gana/Empata/Pierde"),
         })
 
 
