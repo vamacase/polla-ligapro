@@ -4,6 +4,10 @@ SYNC POLLA — corre en tu PC (necesita Playwright para pasar Cloudflare de Sofa
 Uso:
     python sync_polla.py fixture [ronda] [--prod]   # sube próximos partidos (predecibles)
     python sync_polla.py resultados [--prod]        # actualiza marcadores reales + cierra partidos
+    python sync_polla.py resultados-si-en-ventana [--prod]  # como arriba, pero solo si hay
+                                                      # un partido en curso (uso: tarea cada 15-20 min)
+    python sync_polla.py programar-disparos [--prod] # crea disparos puntuales (Task Scheduler)
+                                                      # a kickoff+2h15 por cada partido pendiente
     python sync_polla.py logos [--prod]              # cachea escudos (equipos nuevos que aún no tengan logo)
 
 Por defecto usa .env (base de DESARROLLO). Agregar --prod para operar sobre la
@@ -72,6 +76,91 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
     print(f"\n{len(partidos)} partidos sincronizados a Supabase.")
 
 
+MARGEN_FIN_PARTIDO_MIN = 135  # 2h de partido + 15 min de margen (ver programar_disparos_puntuales)
+
+
+def programar_disparos_puntuales():
+    """Crea, vía Task Scheduler, un disparo puntual (ONCE) por cada partido
+    sin resultado: a kickoff + MARGEN_FIN_PARTIDO_MIN. Así el sync corre justo
+    cuando el partido ya debería haber terminado, en vez de sondear cada
+    15 min durante toda la ventana. Delega en PowerShell (Register-
+    ScheduledTask con un DateTime real) en vez de "schtasks /SD" para no
+    depender del formato de fecha corta configurado en el sistema. Solo
+    funciona en Windows (esta PC) — nombres de tarea únicos por event_id, así
+    que correr esto varias veces no crea duplicados (se usa -Force, que
+    sobrescribe con el mismo horario si ya existía)."""
+    import subprocess
+    from datetime import datetime, timezone, timedelta
+
+    db = get_client()
+    pendientes = db.table("partidos").select("event_id, local, visita, kickoff").is_("gl_real", "null").execute().data
+    ahora = datetime.now(timezone.utc)
+
+    bat = str(Path(__file__).resolve().parent / "sync_resultados_task.bat")
+    creadas = pasadas = fallidas = 0
+    for p in pendientes:
+        ko = datetime.fromisoformat(p["kickoff"].replace("Z", "+00:00"))
+        disparo = ko + timedelta(minutes=MARGEN_FIN_PARTIDO_MIN)
+        if disparo <= ahora:
+            pasadas += 1
+            continue
+        disparo_local = disparo.astimezone()
+        nombre_tarea = f"PollaLigaPro_Resultado_{p['event_id']}"
+        ps = (
+            f'$action = New-ScheduledTaskAction -Execute "{bat}"; '
+            f'$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date "{disparo_local.isoformat()}"); '
+            f'$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) '
+            f'-StartWhenAvailable; '
+            f'Register-ScheduledTask -TaskName "{nombre_tarea}" -Action $action -Trigger $trigger '
+            f'-Settings $settings -Description "Disparo puntual Polla Liga Pro: {p["local"]} vs {p["visita"]}" -Force | Out-Null'
+        )
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
+        if res.returncode == 0:
+            creadas += 1
+            print(f"  [ok] {p['local']} vs {p['visita']} -> disparo {disparo_local.strftime('%d/%m %H:%M')}")
+        else:
+            fallidas += 1
+            print(f"  [!] {p['local']} vs {p['visita']}: {res.stderr.strip()}")
+
+    print(f"\n{creadas} tareas creadas/actualizadas, {pasadas} con horario ya pasado "
+          f"(se cubren con el sync de 3h), {fallidas} fallidas.")
+
+
+def limpiar_disparos_completados():
+    """Borra las tareas ONCE de partidos que ya tienen resultado — Task
+    Scheduler no las elimina solo al dispararse, solo quedan inactivas."""
+    import subprocess
+    db = get_client()
+    con_resultado = db.table("partidos").select("event_id").not_.is_("gl_real", "null").execute().data
+    borradas = 0
+    for p in con_resultado:
+        nombre_tarea = f"PollaLigaPro_Resultado_{p['event_id']}"
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f'Unregister-ScheduledTask -TaskName "{nombre_tarea}" -Confirm:$false -ErrorAction SilentlyContinue'],
+            capture_output=True, text=True)
+        if res.returncode == 0:
+            borradas += 1
+    if borradas:
+        print(f"{borradas} disparos puntuales ya completados fueron limpiados.")
+
+
+def hay_partido_en_ventana():
+    """True si algún partido sin resultado ya arrancó (kickoff pasado) y sigue
+    dentro de la ventana en la que podría terminar (< VENTANA_PARTIDO_HORAS).
+    Consulta liviana a Supabase (sin Playwright) — permite que la tarea de
+    alta frecuencia decida si vale la pena abrir el navegador o no."""
+    from datetime import datetime, timezone, timedelta
+    db = get_client()
+    pendientes = db.table("partidos").select("kickoff").is_("gl_real", "null").execute().data
+    ahora = datetime.now(timezone.utc)
+    for p in pendientes:
+        ko = datetime.fromisoformat(p["kickoff"].replace("Z", "+00:00"))
+        if ko <= ahora <= ko + timedelta(hours=VENTANA_PARTIDO_HORAS):
+            return True
+    return False
+
+
 def sync_resultados(anio=2026):
     """Baja resultados finalizados de SofaScore y actualiza marcadores + cierra partidos."""
     db = get_client()
@@ -91,6 +180,15 @@ def sync_resultados(anio=2026):
             for ev in evs:
                 eid = ev["id"]
                 if eid not in ids_pendientes:
+                    continue
+                # El endpoint "events/last" trae partidos en cualquier estado
+                # (en vivo, entretiempo, finalizado) — homeScore/awayScore ya
+                # existen con el marcador PARCIAL mientras el partido sigue
+                # jugándose. Sin este filtro, un sync que corre a media hora
+                # de fútbol grababa ese parcial como si fuera el resultado
+                # final y el partido, ya con gl_real no-nulo, quedaba fuera
+                # de "pendientes" para siempre — nunca se corregía solo.
+                if ev.get("status", {}).get("type") != "finished":
                     continue
                 hs = ev.get("homeScore", {}).get("current")
                 as_ = ev.get("awayScore", {}).get("current")
@@ -237,10 +335,25 @@ if __name__ == "__main__":
     if modo == "fixture":
         ronda = int(sys.argv[2]) if len(sys.argv) > 2 else None
         sync_fixture(ronda=ronda)
+        programar_disparos_puntuales()
     elif modo == "resultados":
         sync_resultados()
         cerrar_por_kickoff()
         notificar_fechas_terminadas()
+        limpiar_disparos_completados()
+    elif modo == "resultados-si-en-ventana":
+        # Para la tarea de alta frecuencia (cada 15-20 min): solo abre
+        # Playwright/SofaScore si hay un partido que ya arrancó y podría
+        # haber terminado — evita cargar la PC y golpear SofaScore fuera
+        # de horario de partidos.
+        if hay_partido_en_ventana():
+            sync_resultados()
+            cerrar_por_kickoff()
+            notificar_fechas_terminadas()
+        else:
+            print("Sin partidos en ventana activa — se omite esta corrida.")
+    elif modo == "programar-disparos":
+        programar_disparos_puntuales()
     elif modo == "cerrar":
         cerrar_por_kickoff()
     elif modo == "logos":
