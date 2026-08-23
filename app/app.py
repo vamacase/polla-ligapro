@@ -560,37 +560,42 @@ def vista_ranking():
     agregados = {}
     for f in puntos_filas:
         jid = f["jugador_id"]
-        acc = agregados.setdefault(jid, {"puntos_totales": 0, "aciertos_exactos": 0, "partidos_predichos": 0})
+        acc = agregados.setdefault(
+            jid, {"puntos_totales": 0, "aciertos_exactos": 0, "aciertos_1x2": 0, "partidos_predichos": 0})
         acc["puntos_totales"] += f["puntos"]
         acc["aciertos_exactos"] += 1 if f["es_exacto"] else 0
+        acc["aciertos_1x2"] += 1 if f["puntos"] == 1 and not f["es_exacto"] else 0
         acc["partidos_predichos"] += 1
 
     ranking = []
     for j in jugadores:
-        acc = agregados.get(j["id"], {"puntos_totales": 0, "aciertos_exactos": 0, "partidos_predichos": 0})
+        acc = agregados.get(
+            j["id"], {"puntos_totales": 0, "aciertos_exactos": 0, "aciertos_1x2": 0, "partidos_predichos": 0})
         ranking.append({"jugador_id": j["id"], "nombre": j["nombre"], **acc})
     ranking.sort(key=lambda r: (-r["puntos_totales"], -r["aciertos_exactos"]))
 
     mi_id = st.session_state.get("jugador_id")
     medallas = {1: "🥇", 2: "🥈", 3: "🥉"}
+    COL_EXACTO = "Ptos Resultado\nExacto"
+    COL_1X2 = "Ptos Resultado\nGana/Empata/Pierde"
     filas_tabla = []
     for i, fila in enumerate(ranking, start=1):
         nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
         filas_tabla.append({
             "Puesto": medallas.get(i, f"#{i}"),
             "Jugador": nombre,
-            "Pts": fila["puntos_totales"],
-            "Exactos": fila["aciertos_exactos"],
-            "Jugados": fila["partidos_predichos"],
+            "Puntos Totales": fila["puntos_totales"],
+            COL_EXACTO: fila["aciertos_exactos"],
+            COL_1X2: fila["aciertos_1x2"],
         })
     dfr = pd.DataFrame(filas_tabla)
     st.dataframe(
         dfr, width="stretch", hide_index=True,
         column_config={
             "Puesto": st.column_config.TextColumn(width="small"),
-            "Pts": st.column_config.NumberColumn(width="small"),
-            "Exactos": st.column_config.NumberColumn(width="small"),
-            "Jugados": st.column_config.NumberColumn(width="small"),
+            "Puntos Totales": st.column_config.NumberColumn(width="small"),
+            COL_EXACTO: st.column_config.NumberColumn(width="small"),
+            COL_1X2: st.column_config.NumberColumn(width="small"),
         })
 
 
