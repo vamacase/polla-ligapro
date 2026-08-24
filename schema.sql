@@ -68,7 +68,9 @@ select
     pa.gl_real, pa.gv_real, p.gl_pred, p.gv_pred,
     case
         when pa.gl_real is null or pa.gv_real is null then null
-        when p.gl_pred = pa.gl_real and p.gv_pred = pa.gv_real then 1
+        -- Resultado exacto = 1 pto por el marcador + 1 pto por acertar
+        -- también el 1X2 (implícito en el exacto) = 2 ptos.
+        when p.gl_pred = pa.gl_real and p.gv_pred = pa.gv_real then 2
         when sign(p.gl_pred - p.gv_pred) = sign(pa.gl_real - pa.gv_real) then 1
         else 0
     end as puntos,
