@@ -247,15 +247,12 @@ def notificar_fechas_terminadas():
         except Exception:
             continue  # ya notificada por otra corrida en paralelo — no reenviar
 
-        resultados = sorted(
-            [{"local": p["local"], "visita": p["visita"], "gl": p["gl_real"], "gv": p["gv_real"],
-              "fecha": _hora_ecuador(p["kickoff"])}
-             for p in partidos_ronda],
-            key=lambda r: r["local"])
+        partidos_ronda_ord = sorted(partidos_ronda, key=lambda p: p["local"])
+        ids_ronda = [p["id"] for p in partidos_ronda_ord]
 
         ini, fin = rango_polla(numero_polla(ronda))
         ids_polla = [p["id"] for p in partidos if p["fecha_ronda"] is not None and ini <= p["fecha_ronda"] <= fin]
-        puntos_filas = (db.table("v_puntos").select("jugador_id, puntos, es_exacto")
+        puntos_filas = (db.table("v_puntos").select("jugador_id, partido_id, puntos, es_exacto")
                          .in_("partido_id", ids_polla).not_.is_("puntos", "null").execute().data
                          if ids_polla else [])
         agregados = {}
@@ -265,16 +262,44 @@ def notificar_fechas_terminadas():
             acc["exactos"] += 1 if f["es_exacto"] else 0
             acc["jugados"] += 1
 
+        # predicciones + puntos de la ronda recién terminada, por jugador y partido
+        preds_ronda = (db.table("predicciones").select("jugador_id, partido_id, gl_pred, gv_pred")
+                        .in_("partido_id", ids_ronda).execute().data
+                        if ids_ronda else [])
+        preds_por_jugador = {}
+        for pr in preds_ronda:
+            preds_por_jugador.setdefault(pr["jugador_id"], {})[pr["partido_id"]] = pr
+        puntos_ronda_por_jugador = {}
+        for f in puntos_filas:
+            if f["partido_id"] in ids_ronda:
+                puntos_ronda_por_jugador.setdefault(f["jugador_id"], {})[f["partido_id"]] = f
+
         jugadores = db.table("jugadores").select("id, nombre, email").execute().data
         ranking = sorted(
             [{"nombre": j["nombre"], **agregados.get(j["id"], {"puntos": 0, "exactos": 0, "jugados": 0})}
              for j in jugadores],
             key=lambda r: (-r["puntos"], -r["exactos"]))
 
-        destinatarios = [j["email"] for j in jugadores if j["email"]]
-        if destinatarios:
-            enviar_fecha_terminada(destinatarios, ronda, resultados, ranking)
-            print(f"  [ok] correo de fecha terminada enviado — Fecha {ronda}")
+        for j in jugadores:
+            if not j["email"]:
+                continue
+            preds_j = preds_por_jugador.get(j["id"], {})
+            puntos_j = puntos_ronda_por_jugador.get(j["id"], {})
+            resultados = []
+            for p in partidos_ronda_ord:
+                pr = preds_j.get(p["id"])
+                vp = puntos_j.get(p["id"])
+                resultados.append({
+                    "local": p["local"], "visita": p["visita"], "gl": p["gl_real"], "gv": p["gv_real"],
+                    "fecha": _hora_ecuador(p["kickoff"]),
+                    "gl_pred": pr["gl_pred"] if pr else None,
+                    "gv_pred": pr["gv_pred"] if pr else None,
+                    "puntos": vp["puntos"] if vp else None,
+                    "es_exacto": vp["es_exacto"] if vp else False,
+                })
+            enviar_fecha_terminada(j["email"], j["nombre"], ronda, resultados, ranking)
+        print(f"  [ok] correo de fecha terminada enviado — Fecha {ronda} "
+              f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
 
 def sync_logos():

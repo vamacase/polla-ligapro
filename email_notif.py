@@ -213,27 +213,52 @@ def enviar_todos_predijeron(destinatarios: list[str], ronda, partidos: list[dict
     return _enviar_html(destinatarios, f"Polla Liga Pro — predicciones de todos (Fecha {ronda})", html)
 
 
-def enviar_fecha_terminada(destinatarios: list[str], ronda, resultados: list[dict], ranking: list[dict]) -> bool:
-    """resultados: [{"local": str, "visita": str, "gl": int, "gv": int}, ...]
+def _fila_resultado_con_prediccion(r: dict) -> str:
+    """r trae, además de local/visita/gl/gv/fecha, la predicción del jugador
+    para ese partido (gl_pred/gv_pred) y sus puntos/es_exacto (v_puntos)."""
+    gl_pred, gv_pred = r.get("gl_pred"), r.get("gv_pred")
+    puntos = r.get("puntos")
+    if gl_pred is None or gv_pred is None:
+        pred_html = f'<span style="font-size:12px; color:{_FAINT};">sin predicción</span>'
+        icono = ""
+    else:
+        pred_html = (f'<span style="font-size:12.5px; color:{_MUTED};">tu predicción: '
+                     f'<b style="color:{_TEXT};">{gl_pred}–{gv_pred}</b></span>')
+        if r.get("es_exacto"):
+            icono = f"✅✅ +{puntos} pts"
+        elif puntos == 1:
+            icono = f"✅ +{puntos} pto"
+        else:
+            icono = "❌ +0 pto"
+    return f"""<tr>
+      <td style="padding:13px 16px 2px; font-size:11px; color:{_FAINT};" colspan="3">{r.get('fecha', '')}</td>
+    </tr>
+    <tr>
+      <td style="padding:0 16px 2px; font-size:13.5px; font-weight:600; color:{_TEXT};">{r['local']}</td>
+      <td style="padding:0 8px 2px; text-align:center; width:60px;">{_marcador(r['gl'], r['gv'])}</td>
+      <td style="padding:0 16px 2px; font-size:13.5px; font-weight:600; color:{_TEXT}; text-align:right;">{r['visita']}</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="padding:0 16px 13px;">{pred_html}</td>
+      <td style="padding:0 16px 13px; text-align:right; font-size:14px;">{icono}</td>
+    </tr>
+    <tr><td colspan="3" style="border-top:1px solid {_BORDER};"></td></tr>"""
+
+
+def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
+                            resultados: list[dict], ranking: list[dict]) -> bool:
+    """resultados: [{"local", "visita", "gl", "gv", "fecha", "gl_pred", "gv_pred",
+    "puntos", "es_exacto"}, ...] — la predicción es la de jugador_email.
     ranking: [{"nombre": str, "puntos": int}, ...] ya ordenado por puntos desc.
     """
-    res_html = "".join(
-        f"""<tr>
-          <td style="padding:13px 16px 2px; font-size:11px; color:{_FAINT};" colspan="3">{r.get('fecha', '')}</td>
-        </tr>
-        <tr>
-          <td style="padding:0 16px 13px; font-size:13.5px; font-weight:600; color:{_TEXT};">{r['local']}</td>
-          <td style="padding:0 8px 13px; text-align:center; width:60px;">{_marcador(r['gl'], r['gv'])}</td>
-          <td style="padding:0 16px 13px; font-size:13.5px; font-weight:600; color:{_TEXT}; text-align:right;">{r['visita']}</td>
-        </tr>
-        <tr><td colspan="3" style="border-top:1px solid {_BORDER};"></td></tr>"""
-        for r in resultados
-    )
+    res_html = "".join(_fila_resultado_con_prediccion(r) for r in resultados)
     medallas = {0: "🥇", 1: "🥈", 2: "🥉"}
     rank_filas = []
     for i, r in enumerate(ranking):
-        destacado = i == 0
-        detalle = f"{r.get('exactos', 0)} exactos · {r.get('jugados', 0)} jugados"
+        destacado = r["nombre"] == jugador_nombre
+        pts_exacto = r.get("exactos", 0) * 2
+        pts_1x2 = r.get("puntos", 0) - pts_exacto
+        detalle = f"{pts_exacto} pts exacto · {pts_1x2} pts G/E/P"
         rank_filas.append(f"""<tr style="{'background:' + _ACCENT_SOFT + ';' if destacado else ''}">
           <td style="padding:12px 8px 12px 16px; font-size:{'14px' if destacado else '13px'}; color:{_TEXT if destacado else _FAINT}; white-space:nowrap;">{medallas.get(i, f'#{i + 1}')}</td>
           <td style="padding:12px 4px;">
@@ -247,7 +272,7 @@ def enviar_fecha_terminada(destinatarios: list[str], ronda, resultados: list[dic
 
     cuerpo = f"""
     <tr><td style="padding-bottom:8px;">
-      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Resultados</span>
+      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Resultados y tus predicciones</span>
     </td></tr>
     <tr><td>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden; margin-bottom:24px;">
@@ -265,7 +290,7 @@ def enviar_fecha_terminada(destinatarios: list[str], ronda, resultados: list[dic
     """
     html = _envolver(
         "🏁", f"Fecha {ronda} terminada",
-        "Estos fueron los resultados y así quedó la tabla:",
+        f"Hola {jugador_nombre}, estos fueron los resultados, tus aciertos y así quedó la tabla:",
         cuerpo, "Ver tabla completa",
         "entra a la app para ver el detalle completo.")
-    return _enviar_html(destinatarios, f"Polla Liga Pro — resultados y tabla (Fecha {ronda})", html)
+    return _enviar_html([jugador_email], f"Polla Liga Pro — resultados y tabla (Fecha {ronda})", html)
