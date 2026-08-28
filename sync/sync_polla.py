@@ -162,16 +162,27 @@ def hay_partido_en_ventana():
 
 
 def sync_resultados(anio=2026):
-    """Baja resultados finalizados de SofaScore y actualiza marcadores + cierra partidos."""
+    """Baja resultados finalizados de SofaScore y actualiza marcadores + cierra
+    partidos. También refresca el kickoff de partidos aún no jugados: cuando
+    se carga un fixture nuevo, SofaScore a veces solo confirma la fecha de la
+    ronda y da un horario provisional por partido — el horario definitivo se
+    publica después, y sync_fixture() solo corre una vez por ronda, así que
+    sin este refresco el kickoff guardado queda desactualizado en silencio
+    (bug real: los 8 partidos de Fecha 27 quedaron con el mismo timestamp
+    provisional, y un jugador alcanzó a predecir después del kickoff real de
+    uno de ellos porque el bloqueo de la app usa el kickoff guardado)."""
+    from datetime import datetime, timezone
     db = get_client()
     pendientes = db.table("partidos").select("*").is_("gl_real", "null").execute().data
     if not pendientes:
         print("No hay partidos pendientes de resultado en la base.")
         return
     ids_pendientes = {p["event_id"] for p in pendientes}
+    kickoff_actual = {p["event_id"]: p["kickoff"] for p in pendientes}
     print(f"Partidos pendientes de resultado: {len(ids_pendientes)}")
 
     actualizados = 0
+    kickoffs_corregidos = 0
     with SofaScore() as sofa:
         pagina = 0
         while True:
@@ -204,7 +215,32 @@ def sync_resultados(anio=2026):
             pagina += 1
             sofa.page.wait_for_timeout(400)
 
+        pagina = 0
+        while True:
+            r = sofa.fetch_json(f"/api/v1/unique-tournament/{TOURN}/season/{SEASONS[anio]}/events/next/{pagina}")
+            evs = r.get("events", [])
+            for ev in evs:
+                eid = ev["id"]
+                if eid not in ids_pendientes:
+                    continue
+                dt_real = datetime.fromtimestamp(ev["startTimestamp"], tz=timezone.utc)
+                kickoff_guardado = kickoff_actual.get(eid)
+                dt_guardado = (datetime.fromisoformat(kickoff_guardado.replace("Z", "+00:00"))
+                               if kickoff_guardado else None)
+                if dt_guardado != dt_real:
+                    kickoff_real = dt_real.isoformat()
+                    db.table("partidos").update({"kickoff": kickoff_real}).eq("event_id", eid).execute()
+                    kickoffs_corregidos += 1
+                    print(f"  [kickoff] {ev['homeTeam']['name']} vs {ev['awayTeam']['name']}: "
+                          f"{kickoff_actual.get(eid)} -> {kickoff_real}")
+            if not r.get("hasNextPage") or not evs:
+                break
+            pagina += 1
+            sofa.page.wait_for_timeout(400)
+
     print(f"\n{actualizados} partidos actualizados con resultado real.")
+    if kickoffs_corregidos:
+        print(f"{kickoffs_corregidos} kickoffs corregidos con el horario real de SofaScore.")
 
 
 def _hora_ecuador(kickoff_iso: str) -> str:
