@@ -255,6 +255,17 @@ def fecha_totalmente_predicha(estado_jugadores) -> bool:
     return bool(estado_jugadores) and all(e["total"] > 0 and e["n"] >= e["total"] for e in estado_jugadores)
 
 
+def fecha_ya_revelada(ronda) -> bool:
+    """True si esta fecha ya se reveló alguna vez (candado persistido en
+    notificaciones_enviadas) — a diferencia de fecha_totalmente_predicha(),
+    que se recalcula en vivo y puede volver a False si luego se anula una
+    predicción individual (ej. una tardía). Una vez revelada, se queda
+    revelada: ya se mostraron las apuestas de todos, así que no debe
+    reabrirse la edición aunque el conteo ya no dé "100% completo"."""
+    return bool(db().table("notificaciones_enviadas").select("id")
+                .eq("fecha_ronda", ronda).eq("tipo", "todos_predijeron").execute().data)
+
+
 def intentar_notificar_todos_predijeron(ronda):
     """Si la fecha se acaba de completar (todos predijeron), manda el correo
     de revelación a los 10 — una sola vez por fecha. El insert en
@@ -420,7 +431,11 @@ def vista_predicciones():
     # Seguro: una vez que TODOS predijeron TODA la fecha, se revela en "Mis
     # predicciones" — a partir de ahí ya no se puede editar, para que nadie
     # vea las apuestas de los demás y luego cambie la suya antes del cierre.
-    if fecha_totalmente_predicha(calcular_estado_prediccion(ronda_sel)):
+    # Se consulta el candado persistido (no se recalcula en vivo): si luego
+    # se anula manualmente una predicción individual (ej. por tardía), el
+    # conteo deja de dar "100% completa" pero la fecha ya reveló apuestas —
+    # debe seguir congelada para todos, no reabrirse.
+    if fecha_ya_revelada(ronda_sel):
         st.info("🔒 Todos ya predijeron esta fecha — las predicciones quedaron congeladas. "
                 "Ve a 'Mis predicciones' para verlas todas.")
         return
@@ -667,7 +682,10 @@ def vista_mis_predicciones():
     # Revelación: recién cuando LOS 10 terminaron de predecir TODA la fecha
     # se muestra qué puso cada quien en cada partido. Antes de eso nadie ve
     # nada — ver esto y luego editar la propia predicción sería copiarse.
-    if fecha_totalmente_predicha(estado_jugadores):
+    # Se usa el candado persistido (fecha_ya_revelada), no el recálculo en
+    # vivo: si luego se anula una predicción individual, la fecha sigue
+    # mostrándose revelada — ya se mostró una vez, no debe desaparecer.
+    if fecha_ya_revelada(ronda_sel):
         st.markdown("#### 🔓 Predicciones de todos — fecha completa")
         partidos_ronda_full = (db().table("partidos")
                                 .select("id, local, visita, kickoff, gl_real, gv_real")
