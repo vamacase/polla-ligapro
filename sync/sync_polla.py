@@ -8,6 +8,8 @@ Uso:
                                                       # un partido en curso (uso: tarea cada 15-20 min)
     python sync_polla.py programar-disparos [--prod] # crea disparos puntuales (Task Scheduler)
                                                       # a kickoff+2h15 por cada partido pendiente
+    python sync_polla.py recordatorio-60min [--prod] # manda el correo "faltan 60 min" a los 10
+                                                      # (uso: disparo puntual programado a primer_kickoff-60min)
     python sync_polla.py logos [--prod]              # cachea escudos (equipos nuevos que aún no tengan logo)
 
 Por defecto usa .env (base de DESARROLLO). Agregar --prod para operar sobre la
@@ -37,7 +39,7 @@ print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV
 
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
 from db import get_client  # noqa: E402
-from email_notif import enviar_fecha_terminada  # noqa: E402
+from email_notif import enviar_fecha_terminada, enviar_recordatorio_60min  # noqa: E402
 
 
 def numero_polla(ronda: int) -> int:
@@ -124,6 +126,126 @@ def programar_disparos_puntuales():
 
     print(f"\n{creadas} tareas creadas/actualizadas, {pasadas} con horario ya pasado "
           f"(se cubren con el sync de 3h), {fallidas} fallidas.")
+
+
+def programar_recordatorio_60min():
+    """Crea, vía Task Scheduler, un disparo puntual (ONCE) para el correo de
+    "faltan 60 min" de cada fecha con partidos aún no jugados: se dispara a
+    (kickoff del primer partido de esa fecha) - 60 min. Un único disparo por
+    fecha (no por partido) — nombre de tarea único por fecha_ronda, así que
+    correr esto varias veces no crea duplicados (usa -Force)."""
+    import subprocess
+    from datetime import datetime, timezone, timedelta
+
+    db = get_client()
+    pendientes = (db.table("partidos").select("fecha_ronda, kickoff")
+                  .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+    ahora = datetime.now(timezone.utc)
+
+    primer_kickoff_por_ronda = {}
+    for p in pendientes:
+        ko = datetime.fromisoformat(p["kickoff"].replace("Z", "+00:00"))
+        actual = primer_kickoff_por_ronda.get(p["fecha_ronda"])
+        if actual is None or ko < actual:
+            primer_kickoff_por_ronda[p["fecha_ronda"]] = ko
+
+    bat = str(Path(__file__).resolve().parent / "sync_recordatorio_task.bat")
+    creadas = pasadas = fallidas = 0
+    for ronda, primer_ko in primer_kickoff_por_ronda.items():
+        disparo = primer_ko - timedelta(minutes=60)
+        if disparo <= ahora:
+            pasadas += 1
+            continue
+        disparo_local = disparo.astimezone()
+        nombre_tarea = f"PollaLigaPro_Recordatorio60_{ronda}"
+        ps = (
+            f'$action = New-ScheduledTaskAction -Execute "{bat}"; '
+            f'$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date "{disparo_local.isoformat()}"); '
+            f'$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) '
+            f'-StartWhenAvailable; '
+            f'Register-ScheduledTask -TaskName "{nombre_tarea}" -Action $action -Trigger $trigger '
+            f'-Settings $settings -Description "Recordatorio 60min Polla Liga Pro: Fecha {ronda}" -Force | Out-Null'
+        )
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
+        if res.returncode == 0:
+            creadas += 1
+            print(f"  [ok] Fecha {ronda} -> recordatorio {disparo_local.strftime('%d/%m %H:%M')}")
+        else:
+            fallidas += 1
+            print(f"  [!] Fecha {ronda}: {res.stderr.strip()}")
+
+    print(f"\n{creadas} recordatorios de 60min creados/actualizados, {pasadas} con horario ya pasado, "
+          f"{fallidas} fallidos.")
+
+
+def enviar_recordatorios_60min():
+    """Manda el correo de "faltan 60 min" a los 10 jugadores para la fecha
+    cuyo primer partido arranca dentro de la próxima hora. Idempotente vía
+    notificaciones_enviadas (tipo "recordatorio_60min") — si el disparo
+    puntual se reintenta o corre dos veces, no reenvía."""
+    db = get_client()
+    partidos = (db.table("partidos").select("id, fecha_ronda, kickoff, local, visita")
+                .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+    por_ronda = {}
+    for p in partidos:
+        por_ronda.setdefault(p["fecha_ronda"], []).append(p)
+
+    ya_notificadas = {
+        n["fecha_ronda"] for n in
+        db.table("notificaciones_enviadas").select("fecha_ronda").eq("tipo", "recordatorio_60min").execute().data
+    }
+
+    for ronda, partidos_ronda in por_ronda.items():
+        if ronda in ya_notificadas:
+            continue
+        partidos_ronda_ord = sorted(partidos_ronda, key=lambda p: p["kickoff"])
+
+        try:
+            db.table("notificaciones_enviadas").insert(
+                {"fecha_ronda": ronda, "tipo": "recordatorio_60min"}).execute()
+        except Exception:
+            continue  # ya notificada por otra corrida en paralelo — no reenviar
+
+        lista_partidos = [
+            {"local": p["local"], "visita": p["visita"], "hora": _hora_ecuador_hm(p["kickoff"])}
+            for p in partidos_ronda_ord
+        ]
+
+        ini, fin = rango_polla(numero_polla(ronda))
+        ids_polla = [p["id"] for p in
+                     db.table("partidos").select("id, fecha_ronda")
+                     .execute().data if p["fecha_ronda"] is not None and ini <= p["fecha_ronda"] <= fin]
+        puntos_filas = (db.table("v_puntos").select("jugador_id, puntos, es_exacto")
+                         .in_("partido_id", ids_polla).not_.is_("puntos", "null").execute().data
+                         if ids_polla else [])
+        agregados = {}
+        for f in puntos_filas:
+            acc = agregados.setdefault(f["jugador_id"], {"puntos": 0, "exactos": 0})
+            acc["puntos"] += f["puntos"]
+            acc["exactos"] += 1 if f["es_exacto"] else 0
+
+        jugadores = db.table("jugadores").select("id, nombre, email").execute().data
+        ranking = sorted(
+            [{"id": j["id"], "nombre": j["nombre"], **agregados.get(j["id"], {"puntos": 0, "exactos": 0})}
+             for j in jugadores],
+            key=lambda r: (-r["puntos"], -r["exactos"]))
+        top3 = [r["nombre"] for r in ranking[:3]]
+        nombres_top3 = set(top3)
+
+        for j in jugadores:
+            if not j["email"]:
+                continue
+            enviar_recordatorio_60min(j["email"], j["nombre"], ronda, lista_partidos,
+                                       top3, j["nombre"] in nombres_top3)
+        print(f"  [ok] recordatorio 60min enviado — Fecha {ronda} "
+              f"({sum(1 for j in jugadores if j['email'])} jugadores)")
+
+        import subprocess
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f'Unregister-ScheduledTask -TaskName "PollaLigaPro_Recordatorio60_{ronda}" '
+             f'-Confirm:$false -ErrorAction SilentlyContinue'],
+            capture_output=True, text=True)
 
 
 def limpiar_disparos_completados():
@@ -251,6 +373,15 @@ def _hora_ecuador(kickoff_iso: str) -> str:
     from datetime import timezone, timedelta
     t = pd.to_datetime(kickoff_iso)
     return t.tz_convert(timezone(timedelta(hours=-5))).strftime("%a %d/%m")
+
+
+def _hora_ecuador_hm(kickoff_iso: str) -> str:
+    """Como _hora_ecuador() pero con hora incluida (para listar partidos en
+    orden de kickoff con su horario exacto)."""
+    import pandas as pd
+    from datetime import timezone, timedelta
+    t = pd.to_datetime(kickoff_iso)
+    return t.tz_convert(timezone(timedelta(hours=-5))).strftime("%a %d/%m %H:%M")
 
 
 def notificar_fechas_terminadas():
@@ -397,6 +528,7 @@ if __name__ == "__main__":
         ronda = int(sys.argv[2]) if len(sys.argv) > 2 else None
         sync_fixture(ronda=ronda)
         programar_disparos_puntuales()
+        programar_recordatorio_60min()
     elif modo == "resultados":
         sync_resultados()
         cerrar_por_kickoff()
@@ -415,6 +547,9 @@ if __name__ == "__main__":
             print("Sin partidos en ventana activa — se omite esta corrida.")
     elif modo == "programar-disparos":
         programar_disparos_puntuales()
+        programar_recordatorio_60min()
+    elif modo == "recordatorio-60min":
+        enviar_recordatorios_60min()
     elif modo == "cerrar":
         cerrar_por_kickoff()
     elif modo == "logos":

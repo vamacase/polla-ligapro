@@ -294,3 +294,63 @@ def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
         cuerpo, "Ver tabla completa",
         "entra a la app para ver el detalle completo.")
     return _enviar_html([jugador_email], f"Polla Liga Pro — resultados y tabla (Fecha {ronda})", html)
+
+
+def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
+                               partidos: list[dict], top3: list[str], en_top3: bool) -> bool:
+    """partidos: [{"local", "visita", "hora"}, ...] ya ordenados por kickoff
+    (el primero de la lista es el que arranca primero).
+    top3: nombres de los 3 primeros lugares actuales, en orden.
+    en_top3: True si jugador_nombre ya está en ese top 3.
+    """
+    partidos_html = "".join(
+        f"""<tr>
+          <td style="padding:11px 16px; font-size:12px; color:{_FAINT}; white-space:nowrap; width:76px;">{p['hora']}</td>
+          <td style="padding:11px 16px 11px 0; font-size:13.5px; font-weight:600; color:{_TEXT};">{p['local']} vs {p['visita']}</td>
+        </tr>
+        <tr><td colspan="2" style="border-top:1px solid {_BORDER};"></td></tr>"""
+        for p in partidos
+    )
+
+    top3_html = "".join(
+        f"""<tr>
+          <td style="padding:6px 16px; font-size:13.5px; font-weight:600; color:{_TEXT};">{medalla} {nombre}</td>
+        </tr>"""
+        for medalla, nombre in zip(["🥇", "🥈", "🥉"], top3)
+    )
+
+    if en_top3:
+        mensaje_motivacion = ("Ya estás en el podio — un buen pronóstico esta fecha te ayuda a "
+                               "alejarte del resto y encaminarte a ganar la competencia.")
+    else:
+        mensaje_motivacion = ("Todavía no estás en el podio — un buen pronóstico esta fecha es tu "
+                               "oportunidad de alcanzar a los primeros lugares.")
+
+    cuerpo = f"""
+    <tr><td style="padding-bottom:8px;">
+      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Top 3 actual</span>
+    </td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden; margin-bottom:16px;">
+        {top3_html}
+      </table>
+    </td></tr>
+    <tr><td style="padding-bottom:20px;">
+      <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">{mensaje_motivacion}</span>
+    </td></tr>
+    <tr><td style="padding-bottom:8px;">
+      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Partidos de esta fecha (en orden)</span>
+    </td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden;">
+        {partidos_html}
+      </table>
+    </td></tr>
+    """
+    html = _envolver(
+        "⏰", f"¡Faltan 60 minutos! — Fecha {ronda}",
+        f"Hola {jugador_nombre}, en una hora arranca el primer partido de la fecha. "
+        f"Haz tu pronóstico lo antes posible para no perder puntos.",
+        cuerpo, "Hacer mi pronóstico",
+        "una vez que arranca el primer partido ya no podrás editar.")
+    return _enviar_html([jugador_email], f"Polla Liga Pro — ¡faltan 60 min! (Fecha {ronda})", html)
