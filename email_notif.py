@@ -312,32 +312,43 @@ def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
         for p in partidos
     )
 
-    top3_html = "".join(
-        f"""<tr>
-          <td style="padding:6px 16px; font-size:13.5px; font-weight:600; color:{_TEXT};">{medalla} {nombre}</td>
-        </tr>"""
-        for medalla, nombre in zip(["🥇", "🥈", "🥉"], top3)
-    )
-
-    if en_top3:
-        mensaje_motivacion = ("Ya estás en el podio — un buen pronóstico esta fecha te ayuda a "
-                               "alejarte del resto y encaminarte a ganar la competencia.")
+    if not top3:
+        # Primera fecha de una polla nueva: nadie tiene puntos todavía, así
+        # que no hay top 3 real que mostrar — evita un podio ficticio.
+        bloque_top3 = f"""
+        <tr><td style="padding-bottom:20px;">
+          <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">🆕 Arranca una nueva ronda — la tabla de posiciones se reinició y todos empiezan desde cero. Haz tu pronóstico y toma la delantera desde ya.</span>
+        </td></tr>
+        """
     else:
-        mensaje_motivacion = ("Todavía no estás en el podio — un buen pronóstico esta fecha es tu "
-                               "oportunidad de alcanzar a los primeros lugares.")
+        top3_html = "".join(
+            f"""<tr>
+              <td style="padding:6px 16px; font-size:13.5px; font-weight:600; color:{_TEXT};">{medalla} {nombre}</td>
+            </tr>"""
+            for medalla, nombre in zip(["🥇", "🥈", "🥉"], top3)
+        )
+        if en_top3:
+            mensaje_motivacion = ("Ya estás en el podio — un buen pronóstico esta fecha te ayuda a "
+                                   "alejarte del resto y encaminarte a ganar la competencia.")
+        else:
+            mensaje_motivacion = ("Todavía no estás en el podio — un buen pronóstico esta fecha es tu "
+                                   "oportunidad de alcanzar a los primeros lugares.")
+        bloque_top3 = f"""
+        <tr><td style="padding-bottom:8px;">
+          <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Top 3 actual</span>
+        </td></tr>
+        <tr><td>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden; margin-bottom:16px;">
+            {top3_html}
+          </table>
+        </td></tr>
+        <tr><td style="padding-bottom:20px;">
+          <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">{mensaje_motivacion}</span>
+        </td></tr>
+        """
 
     cuerpo = f"""
-    <tr><td style="padding-bottom:8px;">
-      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Top 3 actual</span>
-    </td></tr>
-    <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden; margin-bottom:16px;">
-        {top3_html}
-      </table>
-    </td></tr>
-    <tr><td style="padding-bottom:20px;">
-      <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">{mensaje_motivacion}</span>
-    </td></tr>
+    {bloque_top3}
     <tr><td style="padding-bottom:8px;">
       <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Partidos de esta fecha (en orden)</span>
     </td></tr>

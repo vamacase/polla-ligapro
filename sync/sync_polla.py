@@ -229,7 +229,10 @@ def enviar_recordatorios_60min():
             [{"id": j["id"], "nombre": j["nombre"], **agregados.get(j["id"], {"puntos": 0, "exactos": 0})}
              for j in jugadores],
             key=lambda r: (-r["puntos"], -r["exactos"]))
-        top3 = [r["nombre"] for r in ranking[:3]]
+        # Primera fecha de una polla nueva: nadie tiene puntos aún — no hay
+        # top 3 real (sería un podio ficticio, por orden arbitrario de id).
+        hay_puntos = any(r["puntos"] > 0 for r in ranking)
+        top3 = [r["nombre"] for r in ranking[:3]] if hay_puntos else []
         nombres_top3 = set(top3)
 
         for j in jugadores:
