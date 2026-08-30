@@ -566,13 +566,19 @@ def vista_ranking():
     ini, fin = rango_polla(polla_sel)
 
     ids_partidos = [p["id"] for p in partidos if p["fecha_ronda"] is not None and ini <= p["fecha_ronda"] <= fin]
+    # partido_id -> fecha_ronda, para poder desglosar puntos por fecha además
+    # de por polla completa (usado en las pestañas "Por fecha" y "Barras").
+    ronda_por_partido = {p["id"]: p["fecha_ronda"] for p in partidos}
+    fechas_polla = list(range(ini, fin + 1))
+
     puntos_filas = []
     if ids_partidos:
-        puntos_filas = (db().table("v_puntos").select("jugador_id, puntos, es_exacto")
+        puntos_filas = (db().table("v_puntos").select("jugador_id, partido_id, puntos, es_exacto")
                          .in_("partido_id", ids_partidos).not_.is_("puntos", "null")
                          .execute().data)
 
     agregados = {}
+    por_fecha = {}  # jugador_id -> {fecha_ronda: puntos}
     for f in puntos_filas:
         jid = f["jugador_id"]
         acc = agregados.setdefault(
@@ -581,6 +587,9 @@ def vista_ranking():
         acc["aciertos_exactos"] += 1 if f["es_exacto"] else 0
         acc["aciertos_1x2"] += 1 if f["puntos"] == 1 and not f["es_exacto"] else 0
         acc["partidos_predichos"] += 1
+        fecha = ronda_por_partido.get(f["partido_id"])
+        if fecha is not None:
+            por_fecha.setdefault(jid, {})[fecha] = por_fecha.setdefault(jid, {}).get(fecha, 0) + f["puntos"]
 
     ranking = []
     for j in jugadores:
@@ -593,6 +602,7 @@ def vista_ranking():
     medallas = {1: "🥇", 2: "🥈", 3: "🥉"}
     COL_EXACTO = "Exacto"
     COL_1X2 = "G/E/P"
+
     filas_tabla = []
     for i, fila in enumerate(ranking, start=1):
         nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
@@ -613,6 +623,60 @@ def vista_ranking():
             COL_EXACTO: st.column_config.NumberColumn(width="small", help="Puntos por resultado exacto"),
             COL_1X2: st.column_config.NumberColumn(width="small", help="Puntos por acertar Gana/Empata/Pierde"),
         })
+
+    st.markdown("#### Puntos por fecha")
+    filas_fecha = []
+    for i, fila in enumerate(ranking, start=1):
+        nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
+        puntos_jugador = por_fecha.get(fila["jugador_id"], {})
+        filas_fecha.append({
+            "Puesto": medallas.get(i, f"#{i}"),
+            "Jugador": nombre,
+            **{f"F{r}": puntos_jugador.get(r, 0) for r in fechas_polla},
+            "Total": fila["puntos_totales"],
+        })
+    dff = pd.DataFrame(filas_fecha)
+    col_config = {
+        "Puesto": st.column_config.TextColumn(width="small"),
+        "Jugador": st.column_config.TextColumn(width="medium"),
+        "Total": st.column_config.NumberColumn(width="small"),
+    }
+    for r in fechas_polla:
+        col_config[f"F{r}"] = st.column_config.NumberColumn(width="small")
+    st.dataframe(dff, width="stretch", hide_index=True, column_config=col_config)
+    st.caption("Columnas en 0 = fecha aún sin jugar o sin puntos en esa fecha.")
+
+    st.markdown("#### Puntos por fecha — barras")
+    colores = ["#9DB8A8", "#E4C580", "#D8A9A0", "#A8B8D8", "#C9A8CC"]
+    max_total = max((r["puntos_totales"] for r in ranking), default=0)
+    for i, fila in enumerate(ranking, start=1):
+        nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
+        puntos_jugador = por_fecha.get(fila["jugador_id"], {})
+        segmentos_html = "".join(
+            f'<div style="height:100%; background:{colores[idx % len(colores)]}; '
+            f'width:{(puntos_jugador.get(r, 0) / max_total * 100) if max_total else 0}%;"></div>'
+            for idx, r in enumerate(fechas_polla)
+        )
+        st.markdown(
+            f'<div style="display:grid; grid-template-columns:140px 1fr 32px; align-items:center; '
+            f'gap:10px; margin-bottom:10px;">'
+            f'<div style="font-size:0.82rem; font-weight:600; white-space:nowrap; overflow:hidden; '
+            f'text-overflow:ellipsis;">{medallas.get(i, f"#{i}")} {nombre}</div>'
+            f'<div style="height:16px; border-radius:4px; overflow:hidden; display:flex; '
+            f'background:#EFEFEA;">{segmentos_html}</div>'
+            f'<div style="text-align:right; font-size:0.86rem; font-weight:800;">{fila["puntos_totales"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True)
+    leyenda_html = "".join(
+        f'<div style="display:flex; align-items:center; gap:6px; font-size:0.74rem; color:var(--polla-muted);">'
+        f'<span style="width:10px; height:10px; border-radius:2px; background:{colores[idx % len(colores)]}; '
+        f'display:inline-block;"></span>Fecha {r}</div>'
+        for idx, r in enumerate(fechas_polla)
+    )
+    st.markdown(
+        f'<div style="display:flex; gap:16px; flex-wrap:wrap; padding-top:10px; '
+        f'border-top:1px solid var(--polla-border); margin-top:6px;">{leyenda_html}</div>',
+        unsafe_allow_html=True)
 
 
 def vista_resultados():
