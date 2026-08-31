@@ -471,6 +471,20 @@ def notificar_fechas_terminadas():
         print(f"  [ok] correo de fecha terminada enviado — Fecha {ronda} "
               f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
+        # Al cerrar una fecha, cargar automáticamente la siguiente si aún no
+        # existe en la base — evita que quede sin subir hasta que alguien lo
+        # note y lo pida a mano (pasó con la Fecha 28 tras cerrar la 27).
+        siguiente = ronda + 1
+        ya_existe = db.table("partidos").select("id").eq("fecha_ronda", siguiente).limit(1).execute().data
+        if not ya_existe:
+            try:
+                print(f"  Fecha {ronda} terminada — cargando automáticamente Fecha {siguiente}...")
+                sync_fixture(ronda=siguiente)
+                programar_disparos_puntuales()
+                programar_recordatorio_60min()
+            except Exception as e:
+                print(f"  [!] No se pudo cargar automáticamente la Fecha {siguiente}: {e}")
+
 
 def sync_logos():
     """Descarga y cachea escudos de equipo + logo de la liga (base64) en Supabase.
