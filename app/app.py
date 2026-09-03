@@ -230,28 +230,43 @@ def rango_polla(numero: int) -> tuple[int, int]:
 
 
 def calcular_estado_prediccion(ronda):
-    """Para una fecha, cuenta cuántos partidos predijo cada jugador.
+    """Para una fecha, cuenta cuántos partidos predijo cada jugador, contra
+    cuántos alcanzó a ver (partidos aún abiertos, más los que ya predijo de
+    los que cerraron mientras tanto).
+
+    Si un jugador entra tarde y algunos partidos de la fecha ya cerraron
+    (bloqueo normal de kickoff), nunca podrá llegar al total histórico de
+    partidos de la fecha — quedaría "incompleto" para siempre aunque haya
+    predicho todo lo que estaba a su alcance. "total" por jugador es
+    entonces: partidos abiertos + partidos cerrados que él sí predijo (los
+    cerrados que no predijo no cuentan ni a favor ni en contra).
 
     Nunca expone los marcadores que cada quien predijo — solo si ya
     completó su predicción o no — para no arruinar la sorpresa antes de
     que cierren los partidos (ver reglamento: la apuesta debe publicarse
     sin haber visto la de los demás).
     """
-    partidos_ronda = db().table("partidos").select("id").eq("fecha_ronda", ronda).execute().data
+    partidos_ronda = db().table("partidos").select("id, cerrado").eq("fecha_ronda", ronda).execute().data
     ids_ronda = [p["id"] for p in partidos_ronda]
-    total = len(ids_ronda)
+    ids_abiertos = {p["id"] for p in partidos_ronda if not p["cerrado"]}
+    n_abiertos = len(ids_abiertos)
     jugadores = db().table("jugadores").select("id, nombre").order("nombre").execute().data
     preds = (db().table("predicciones").select("jugador_id, partido_id")
              .in_("partido_id", ids_ronda).execute().data if ids_ronda else [])
     contadas = {}
+    contadas_cerrados = {}
     for pr in preds:
         contadas[pr["jugador_id"]] = contadas.get(pr["jugador_id"], 0) + 1
-    return [{"id": j["id"], "nombre": j["nombre"], "n": contadas.get(j["id"], 0), "total": total}
+        if pr["partido_id"] not in ids_abiertos:
+            contadas_cerrados[pr["jugador_id"]] = contadas_cerrados.get(pr["jugador_id"], 0) + 1
+    return [{"id": j["id"], "nombre": j["nombre"], "n": contadas.get(j["id"], 0),
+              "total": n_abiertos + contadas_cerrados.get(j["id"], 0)}
             for j in jugadores]
 
 
 def fecha_totalmente_predicha(estado_jugadores) -> bool:
-    """True si TODOS los jugadores ya predijeron TODOS los partidos de la fecha."""
+    """True si TODOS los jugadores completaron lo que alcanzaron a predecir
+    de la fecha (ver calcular_estado_prediccion)."""
     return bool(estado_jugadores) and all(e["total"] > 0 and e["n"] >= e["total"] for e in estado_jugadores)
 
 
@@ -483,13 +498,15 @@ def vista_predicciones():
             st.rerun()
 
 
-def fila_estado_jugador(nombre, completo, es_yo):
+def fila_estado_jugador(nombre, n, total, es_yo):
+    completo = total > 0 and n >= total
     icono = "✅" if completo else "⏳"
     clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
     st.markdown(
         f'<div class="{clase}">'
         f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
         f'<span style="font-size:1.1em">{icono}</span>'
+        f'<span style="font-size:0.85em; color:var(--polla-muted); margin-left:4px;">({n}/{total})</span>'
         f'</div>',
         unsafe_allow_html=True)
 
@@ -740,8 +757,7 @@ def vista_mis_predicciones():
     st.markdown("#### Quién ya predijo esta fecha")
     estado_jugadores = calcular_estado_prediccion(ronda_sel)
     for e in estado_jugadores:
-        completo = e["total"] > 0 and e["n"] >= e["total"]
-        fila_estado_jugador(e["nombre"], completo, e["id"] == jugador_id)
+        fila_estado_jugador(e["nombre"], e["n"], e["total"], e["id"] == jugador_id)
 
     # Revelación: recién cuando LOS 10 terminaron de predecir TODA la fecha
     # se muestra qué puso cada quien en cada partido. Antes de eso nadie ve
