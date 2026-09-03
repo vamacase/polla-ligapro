@@ -196,7 +196,7 @@ def enviar_todos_predijeron(destinatarios: list[str], ronda, partidos: list[dict
               <span style="font-size:14.5px; font-weight:700; color:{_TEXT};">{p['local']} vs {p['visita']}</span>
             </td></tr>
             <tr><td style="padding:0 16px 16px;">
-              {_grupo_html(p['local'], grupos['local'], True)}
+              {_grupo_html(p['local'], grupos['local'], False)}
               {_grupo_html("Empate", grupos['empate'], False)}
               {_grupo_html(p['visita'], grupos['visita'], False)}
             </td></tr>
