@@ -248,6 +248,7 @@ def calcular_estado_prediccion(ronda):
     """
     partidos_ronda = db().table("partidos").select("id, cerrado").eq("fecha_ronda", ronda).execute().data
     ids_ronda = [p["id"] for p in partidos_ronda]
+    total_fecha = len(ids_ronda)  # total real de partidos de la fecha — solo para mostrar en pantalla
     ids_abiertos = {p["id"] for p in partidos_ronda if not p["cerrado"]}
     n_abiertos = len(ids_abiertos)
     jugadores = db().table("jugadores").select("id, nombre").order("nombre").execute().data
@@ -260,7 +261,7 @@ def calcular_estado_prediccion(ronda):
         if pr["partido_id"] not in ids_abiertos:
             contadas_cerrados[pr["jugador_id"]] = contadas_cerrados.get(pr["jugador_id"], 0) + 1
     return [{"id": j["id"], "nombre": j["nombre"], "n": contadas.get(j["id"], 0),
-              "total": n_abiertos + contadas_cerrados.get(j["id"], 0)}
+              "total": n_abiertos + contadas_cerrados.get(j["id"], 0), "total_fecha": total_fecha}
             for j in jugadores]
 
 
@@ -498,15 +499,19 @@ def vista_predicciones():
             st.rerun()
 
 
-def fila_estado_jugador(nombre, n, total, es_yo):
-    completo = total > 0 and n >= total
+def fila_estado_jugador(nombre, n, total_fecha, completo, es_yo):
+    """n/total_fecha es el conteo REAL mostrado en pantalla (ej. 6/8 si un
+    jugador entró tarde y ya no alcanzó a predecir un partido cerrado).
+    `completo` decide el ícono ✅/⏳ y viene de fecha_totalmente_predicha() —
+    considera "completo" a quien predijo todo lo que alcanzó a ver, aunque
+    eso sea menos que total_fecha (ver calcular_estado_prediccion)."""
     icono = "✅" if completo else "⏳"
     clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
     st.markdown(
         f'<div class="{clase}">'
         f'<span style="flex:1; font-weight:{"700" if es_yo else "500"}">{nombre}</span>'
         f'<span style="font-size:1.1em">{icono}</span>'
-        f'<span style="font-size:0.85em; color:var(--polla-muted); margin-left:4px;">({n}/{total})</span>'
+        f'<span style="font-size:0.85em; color:var(--polla-muted); margin-left:4px;">({n}/{total_fecha})</span>'
         f'</div>',
         unsafe_allow_html=True)
 
@@ -757,7 +762,8 @@ def vista_mis_predicciones():
     st.markdown("#### Quién ya predijo esta fecha")
     estado_jugadores = calcular_estado_prediccion(ronda_sel)
     for e in estado_jugadores:
-        fila_estado_jugador(e["nombre"], e["n"], e["total"], e["id"] == jugador_id)
+        completo = e["total"] > 0 and e["n"] >= e["total"]
+        fila_estado_jugador(e["nombre"], e["n"], e["total_fecha"], completo, e["id"] == jugador_id)
 
     # Revelación: recién cuando LOS 10 terminaron de predecir TODA la fecha
     # se muestra qué puso cada quien en cada partido. Antes de eso nadie ve
