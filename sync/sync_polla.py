@@ -474,16 +474,31 @@ def notificar_fechas_terminadas():
         # Al cerrar una fecha, cargar automáticamente la siguiente si aún no
         # existe en la base — evita que quede sin subir hasta que alguien lo
         # note y lo pida a mano (pasó con la Fecha 28 tras cerrar la 27).
+        # Cada paso va en su propio try/except: si sync_fixture() sube el
+        # fixture pero programar_disparos_puntuales() o
+        # programar_recordatorio_60min() fallan (ej. Task Scheduler no
+        # disponible justo al arrancar la PC tras estar apagada), los pasos
+        # siguientes deben intentarse igual en vez de quedar silenciados por
+        # una excepción compartida (pasó con el recordatorio de Fecha 29).
         siguiente = ronda + 1
         ya_existe = db.table("partidos").select("id").eq("fecha_ronda", siguiente).limit(1).execute().data
         if not ya_existe:
+            print(f"  Fecha {ronda} terminada — cargando automáticamente Fecha {siguiente}...")
+            fixture_ok = False
             try:
-                print(f"  Fecha {ronda} terminada — cargando automáticamente Fecha {siguiente}...")
                 sync_fixture(ronda=siguiente)
-                programar_disparos_puntuales()
-                programar_recordatorio_60min()
+                fixture_ok = True
             except Exception as e:
-                print(f"  [!] No se pudo cargar automáticamente la Fecha {siguiente}: {e}")
+                print(f"  [!] No se pudo cargar el fixture de la Fecha {siguiente}: {e}")
+            if fixture_ok:
+                try:
+                    programar_disparos_puntuales()
+                except Exception as e:
+                    print(f"  [!] No se pudieron programar los disparos de resultado de la Fecha {siguiente}: {e}")
+                try:
+                    programar_recordatorio_60min()
+                except Exception as e:
+                    print(f"  [!] No se pudo programar el recordatorio de 60min de la Fecha {siguiente}: {e}")
 
 
 def sync_logos():
