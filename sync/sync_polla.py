@@ -10,6 +10,9 @@ Uso:
                                                       # a kickoff+2h15 por cada partido pendiente
     python sync_polla.py recordatorio-60min [--prod] # manda el correo "faltan 60 min" a los 10
                                                       # (uso: disparo puntual programado a primer_kickoff-60min)
+    python sync_polla.py recordatorio-faltantes [--prod] # manda "aún no has predicho" solo a
+                                                      # quien tiene 0 predicciones en la fecha
+                                                      # (uso: disparo puntual programado AL primer_kickoff)
     python sync_polla.py logos [--prod]              # cachea escudos (equipos nuevos que aún no tengan logo)
 
 Por defecto usa .env (base de DESARROLLO). Agregar --prod para operar sobre la
@@ -39,7 +42,10 @@ print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV
 
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
 from db import get_client  # noqa: E402
-from email_notif import enviar_fecha_terminada, enviar_recordatorio_60min  # noqa: E402
+from email_notif import (  # noqa: E402
+    enviar_fecha_terminada, enviar_recordatorio_60min,
+    enviar_recordatorio_faltantes as enviar_recordatorio_faltantes_email,
+)
 
 
 def numero_polla(ronda: int) -> int:
@@ -176,6 +182,106 @@ def programar_recordatorio_60min():
 
     print(f"\n{creadas} recordatorios de 60min creados/actualizados, {pasadas} con horario ya pasado, "
           f"{fallidas} fallidos.")
+
+
+def programar_recordatorio_faltantes():
+    """Crea, vía Task Scheduler, un disparo puntual (ONCE) para el correo
+    "aún no has predicho" de cada fecha con partidos aún no jugados: se
+    dispara justo AL kickoff del primer partido (a diferencia del
+    recordatorio de 60min, que dispara ANTES) — así solo avisa a quien
+    genuinamente se quedó sin predecir nada mientras arrancaba la fecha.
+    Un único disparo por fecha — nombre de tarea único por fecha_ronda, así
+    que correr esto varias veces no crea duplicados (usa -Force)."""
+    import subprocess
+    from datetime import datetime, timezone
+
+    db = get_client()
+    pendientes = (db.table("partidos").select("fecha_ronda, kickoff")
+                  .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+    ahora = datetime.now(timezone.utc)
+
+    primer_kickoff_por_ronda = {}
+    for p in pendientes:
+        ko = datetime.fromisoformat(p["kickoff"].replace("Z", "+00:00"))
+        actual = primer_kickoff_por_ronda.get(p["fecha_ronda"])
+        if actual is None or ko < actual:
+            primer_kickoff_por_ronda[p["fecha_ronda"]] = ko
+
+    bat = str(Path(__file__).resolve().parent / "sync_recordatorio_faltantes_task.bat")
+    creadas = pasadas = fallidas = 0
+    for ronda, primer_ko in primer_kickoff_por_ronda.items():
+        disparo = primer_ko
+        if disparo <= ahora:
+            pasadas += 1
+            continue
+        disparo_local = disparo.astimezone()
+        nombre_tarea = f"PollaLigaPro_RecordatorioFaltantes_{ronda}"
+        ps = (
+            f'$action = New-ScheduledTaskAction -Execute "{bat}"; '
+            f'$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date "{disparo_local.isoformat()}"); '
+            f'$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) '
+            f'-StartWhenAvailable; '
+            f'Register-ScheduledTask -TaskName "{nombre_tarea}" -Action $action -Trigger $trigger '
+            f'-Settings $settings -Description "Recordatorio faltantes Polla Liga Pro: Fecha {ronda}" -Force | Out-Null'
+        )
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
+        if res.returncode == 0:
+            creadas += 1
+            print(f"  [ok] Fecha {ronda} -> recordatorio faltantes {disparo_local.strftime('%d/%m %H:%M')}")
+        else:
+            fallidas += 1
+            print(f"  [!] Fecha {ronda}: {res.stderr.strip()}")
+
+    print(f"\n{creadas} recordatorios de faltantes creados/actualizados, {pasadas} con horario ya pasado, "
+          f"{fallidas} fallidos.")
+
+
+def enviar_recordatorio_faltantes():
+    """Manda el correo "aún no has predicho" solo a jugadores con 0
+    predicciones en la fecha cuyo primer partido ya cerró. Idempotente vía
+    notificaciones_enviadas (tipo "recordatorio_faltantes") — una sola vez
+    por fecha, igual que los demás correos del sistema."""
+    db = get_client()
+    partidos = (db.table("partidos").select("id, fecha_ronda, kickoff, local, visita, cerrado")
+                .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+    por_ronda = {}
+    for p in partidos:
+        por_ronda.setdefault(p["fecha_ronda"], []).append(p)
+
+    ya_notificadas = {
+        n["fecha_ronda"] for n in
+        db.table("notificaciones_enviadas").select("fecha_ronda").eq("tipo", "recordatorio_faltantes").execute().data
+    }
+
+    for ronda, partidos_ronda in por_ronda.items():
+        if ronda in ya_notificadas:
+            continue
+        partidos_ronda_ord = sorted(partidos_ronda, key=lambda p: p["kickoff"])
+        if not any(p["cerrado"] for p in partidos_ronda_ord):
+            continue  # el primer partido de la fecha aún no cerró — no es momento de avisar
+
+        try:
+            db.table("notificaciones_enviadas").insert(
+                {"fecha_ronda": ronda, "tipo": "recordatorio_faltantes"}).execute()
+        except Exception:
+            continue  # ya notificada por otra corrida en paralelo — no reenviar
+
+        ids_ronda = [p["id"] for p in partidos_ronda_ord]
+        preds = (db.table("predicciones").select("jugador_id").in_("partido_id", ids_ronda).execute().data
+                 if ids_ronda else [])
+        jugadores_con_prediccion = {pr["jugador_id"] for pr in preds}
+
+        pendientes_ronda = [p for p in partidos_ronda_ord if not p["cerrado"]]
+        lista_partidos = [
+            {"local": p["local"], "visita": p["visita"], "hora": _hora_ecuador_hm(p["kickoff"])}
+            for p in pendientes_ronda
+        ]
+
+        jugadores = db.table("jugadores").select("id, nombre, email").execute().data
+        faltantes = [j for j in jugadores if j["id"] not in jugadores_con_prediccion and j["email"]]
+        for j in faltantes:
+            enviar_recordatorio_faltantes_email(j["email"], j["nombre"], ronda, lista_partidos, len(ids_ronda))
+        print(f"  [ok] recordatorio de faltantes enviado — Fecha {ronda} ({len(faltantes)} jugadores)")
 
 
 def enviar_recordatorios_60min():
@@ -499,6 +605,10 @@ def notificar_fechas_terminadas():
                     programar_recordatorio_60min()
                 except Exception as e:
                     print(f"  [!] No se pudo programar el recordatorio de 60min de la Fecha {siguiente}: {e}")
+                try:
+                    programar_recordatorio_faltantes()
+                except Exception as e:
+                    print(f"  [!] No se pudo programar el recordatorio de faltantes de la Fecha {siguiente}: {e}")
 
 
 def sync_logos():
@@ -561,6 +671,7 @@ if __name__ == "__main__":
         sync_fixture(ronda=ronda)
         programar_disparos_puntuales()
         programar_recordatorio_60min()
+        programar_recordatorio_faltantes()
     elif modo == "resultados":
         sync_resultados()
         cerrar_por_kickoff()
@@ -580,8 +691,11 @@ if __name__ == "__main__":
     elif modo == "programar-disparos":
         programar_disparos_puntuales()
         programar_recordatorio_60min()
+        programar_recordatorio_faltantes()
     elif modo == "recordatorio-60min":
         enviar_recordatorios_60min()
+    elif modo == "recordatorio-faltantes":
+        enviar_recordatorio_faltantes()
     elif modo == "cerrar":
         cerrar_por_kickoff()
     elif modo == "logos":

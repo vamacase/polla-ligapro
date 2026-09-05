@@ -365,3 +365,39 @@ def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
         cuerpo, "Hacer mi pronóstico",
         "una vez que arranca el primer partido ya no podrás editar.")
     return _enviar_html([jugador_email], f"Polla Liga Pro — ¡faltan 60 min! (Fecha {ronda})", html)
+
+
+def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda,
+                                   partidos_pendientes: list[dict], total_fecha: int) -> bool:
+    """Solo para jugadores con 0 predicciones en la fecha, enviado justo
+    cuando el primer partido ya cerró. partidos_pendientes: [{"local",
+    "visita", "hora"}, ...] — los que aún puede predecir (ya sin el primero,
+    que quedó cerrado)."""
+    partidos_html = "".join(
+        f"""<tr>
+          <td style="padding:11px 16px; font-size:12px; color:{_FAINT}; white-space:nowrap; width:76px;">{p['hora']}</td>
+          <td style="padding:11px 16px 11px 0; font-size:13.5px; font-weight:600; color:{_TEXT};">{p['local']} vs {p['visita']}</td>
+        </tr>
+        <tr><td colspan="2" style="border-top:1px solid {_BORDER};"></td></tr>"""
+        for p in partidos_pendientes
+    )
+    n_pendientes = len(partidos_pendientes)
+    cuerpo = f"""
+    <tr><td style="padding-bottom:20px;">
+      <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">Ya arrancó el primer partido de la fecha y todavía no has hecho ningún pronóstico — ese ya no cuenta, pero puedes predecir los {n_pendientes} restantes de {total_fecha}.</span>
+    </td></tr>
+    <tr><td style="padding-bottom:8px;">
+      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Partidos que aún puedes predecir</span>
+    </td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden;">
+        {partidos_html}
+      </table>
+    </td></tr>
+    """
+    html = _envolver(
+        "⚠️", f"Aún no has predicho — Fecha {ronda}",
+        f"Hola {jugador_nombre}, no queremos que pierdas más puntos.",
+        cuerpo, "Predecir ahora",
+        "cada partido se cierra al iniciar — entra antes de que se te pasen más.")
+    return _enviar_html([jugador_email], f"Polla Liga Pro — aún no has predicho (Fecha {ronda})", html)
