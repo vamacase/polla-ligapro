@@ -196,12 +196,21 @@ def programar_recordatorio_faltantes():
     from datetime import datetime, timezone
 
     db = get_client()
-    pendientes = (db.table("partidos").select("fecha_ronda, kickoff")
-                  .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+    # Primer kickoff HISTÓRICO de cada ronda activa (no el primer pendiente):
+    # si el partido 1 ya jugó pero quedan partidos 2-8 sin resultado, el
+    # disparo de este correo sigue siendo "al kickoff del partido 1", no del
+    # próximo pendiente — de lo contrario se dispara tarde y avisa del
+    # partido equivocado.
+    rondas_activas = {p["fecha_ronda"] for p in
+                       db.table("partidos").select("fecha_ronda").is_("gl_real", "null")
+                       .not_.is_("fecha_ronda", "null").execute().data}
+    todos_de_rondas_activas = (db.table("partidos").select("fecha_ronda, kickoff")
+                                .in_("fecha_ronda", list(rondas_activas)).execute().data
+                                if rondas_activas else [])
     ahora = datetime.now(timezone.utc)
 
     primer_kickoff_por_ronda = {}
-    for p in pendientes:
+    for p in todos_de_rondas_activas:
         ko = datetime.fromisoformat(p["kickoff"].replace("Z", "+00:00"))
         actual = primer_kickoff_por_ronda.get(p["fecha_ronda"])
         if actual is None or ko < actual:
@@ -242,8 +251,16 @@ def enviar_recordatorio_faltantes():
     notificaciones_enviadas (tipo "recordatorio_faltantes") — una sola vez
     por fecha, igual que los demás correos del sistema."""
     db = get_client()
+    # Todos los partidos de rondas aún no cerradas del todo (al menos un
+    # partido sin resultado) — no solo los partidos sin resultado, porque
+    # necesitamos ver si el PRIMER partido histórico de la fecha ya cerró,
+    # aunque ya tenga resultado y esté fuera de "pendientes".
+    rondas_activas = {p["fecha_ronda"] for p in
+                       db.table("partidos").select("fecha_ronda").is_("gl_real", "null")
+                       .not_.is_("fecha_ronda", "null").execute().data}
     partidos = (db.table("partidos").select("id, fecha_ronda, kickoff, local, visita, cerrado")
-                .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+                .in_("fecha_ronda", list(rondas_activas)).execute().data
+                if rondas_activas else [])
     por_ronda = {}
     for p in partidos:
         por_ronda.setdefault(p["fecha_ronda"], []).append(p)
