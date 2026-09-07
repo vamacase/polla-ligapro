@@ -1,6 +1,7 @@
 """Polla Liga Pro Ecuador — webapp Streamlit (predicciones + ranking entre amigos)."""
 import os
 import sys
+import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -352,6 +353,11 @@ def login():
                 st.session_state["jugador_nombre"] = nombre
                 cookies().set("polla_jugador_id", str(fila["id"]),
                                max_age=DIAS_SESION * 24 * 3600)
+                # El componente de cookies escribe en el navegador de forma
+                # asíncrona (vía su iframe interno) — sin esta pausa, el
+                # rerun cortaba el ciclo antes de que la cookie llegara a
+                # existir y la sesión nunca sobrevivía a un refresco.
+                time.sleep(0.5)
                 st.rerun()
             else:
                 st.error("PIN incorrecto.")
@@ -989,6 +995,9 @@ def main():
             del st.session_state["jugador_nombre"]
             st.session_state.pop("es_admin", None)
             cookies().remove("polla_jugador_id")
+            # Misma condición de carrera que en login(): sin esta pausa, el
+            # rerun corta el ciclo antes de que el navegador borre la cookie.
+            time.sleep(0.5)
             st.rerun()
 
         if not es_admin:
