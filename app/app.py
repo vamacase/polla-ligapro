@@ -363,9 +363,14 @@ def login():
 
 
 def cargar_partidos_abiertos():
-    ahora = datetime.now(timezone.utc).isoformat()
+    """Partidos que el jugador aún puede predecir. Se confía únicamente en
+    la columna `cerrado` (actualizada por cerrar_por_kickoff() en sync) —
+    NO se filtra además por kickoff > ahora, porque bajo la política de
+    plazo (1° y 2° partido cierran a su hora; 3° en adelante quedan
+    abiertos hasta el kickoff del 2°) puede haber partidos con kickoff ya
+    pasado que siguen legítimamente abiertos."""
     return (db().table("partidos").select("*")
-            .eq("cerrado", False).gt("kickoff", ahora)
+            .eq("cerrado", False)
             .order("kickoff").execute().data)
 
 
@@ -465,18 +470,20 @@ def vista_predicciones():
 
         enviado = st.form_submit_button("Guardar predicciones", type="primary")
         if enviado:
-            # Revalidar contra la hora real al momento del envío: el formulario
-            # pudo abrirse minutos antes con partidos aún abiertos, pero el
-            # jugador puede tardarse en enviar y que alguno ya haya arrancado.
+            # Revalidar contra el estado real al momento del envío: el
+            # formulario pudo abrirse minutos antes, y "cerrado" pudo
+            # actualizarse mientras tanto (cerrar_por_kickoff() en sync).
+            # Se confía solo en `cerrado`, no en kickoff <= ahora — bajo la
+            # política de plazo, un partido 3°+ con kickoff ya pasado puede
+            # seguir legítimamente abierto hasta que cierre el 2°.
             ids = list(valores.keys())
             frescos = {p["id"]: p for p in db().table("partidos").select("id, local, visita, kickoff, cerrado")
                        .in_("id", ids).execute().data}
-            ahora = datetime.now(timezone.utc)
             guardados, rechazados = 0, []
             confirmadas = []
             for partido_id, (gl, gv) in valores.items():
                 p = frescos.get(partido_id)
-                if not p or p["cerrado"] or pd.to_datetime(p["kickoff"]) <= ahora:
+                if not p or p["cerrado"]:
                     rechazados.append(p["local"] + " vs " + p["visita"] if p else f"partido {partido_id}")
                     continue
                 db().table("predicciones").upsert({

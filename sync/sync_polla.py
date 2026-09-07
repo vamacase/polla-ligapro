@@ -187,20 +187,20 @@ def programar_recordatorio_60min():
 def programar_recordatorio_faltantes():
     """Crea, vía Task Scheduler, un disparo puntual (ONCE) para el correo
     "aún no has predicho" de cada fecha con partidos aún no jugados: se
-    dispara justo AL kickoff del primer partido (a diferencia del
-    recordatorio de 60min, que dispara ANTES) — así solo avisa a quien
-    genuinamente se quedó sin predecir nada mientras arrancaba la fecha.
-    Un único disparo por fecha — nombre de tarea único por fecha_ronda, así
-    que correr esto varias veces no crea duplicados (usa -Force)."""
+    dispara justo AL kickoff del PRIMER partido de la fecha — aviso
+    temprano para quien todavía no predijo nada. El plazo real de cierre de
+    la fecha es el kickoff del 2° partido (ver cerrar_por_kickoff()), pero
+    este correo dispara antes, al primero, a propósito. Un único disparo
+    por fecha — nombre de tarea único por fecha_ronda, así que correr esto
+    varias veces no crea duplicados (usa -Force)."""
     import subprocess
     from datetime import datetime, timezone
 
     db = get_client()
-    # Primer kickoff HISTÓRICO de cada ronda activa (no el primer pendiente):
-    # si el partido 1 ya jugó pero quedan partidos 2-8 sin resultado, el
+    # Primer kickoff HISTÓRICO de cada ronda activa (no el primer
+    # pendiente): si el partido 1 ya jugó pero quedan 2-8 sin resultado, el
     # disparo de este correo sigue siendo "al kickoff del partido 1", no del
-    # próximo pendiente — de lo contrario se dispara tarde y avisa del
-    # partido equivocado.
+    # próximo pendiente.
     rondas_activas = {p["fecha_ronda"] for p in
                        db.table("partidos").select("fecha_ronda").is_("gl_real", "null")
                        .not_.is_("fecha_ronda", "null").execute().data}
@@ -247,9 +247,11 @@ def programar_recordatorio_faltantes():
 
 def enviar_recordatorio_faltantes():
     """Manda el correo "aún no has predicho" solo a jugadores con 0
-    predicciones en la fecha cuyo primer partido ya cerró. Idempotente vía
-    notificaciones_enviadas (tipo "recordatorio_faltantes") — una sola vez
-    por fecha, igual que los demás correos del sistema."""
+    predicciones en la fecha, disparado cuando el PRIMER partido de la
+    fecha ya cerró — aviso temprano (el plazo real de cierre de la fecha
+    es el kickoff del 2° partido, ver cerrar_por_kickoff()). Idempotente
+    vía notificaciones_enviadas (tipo "recordatorio_faltantes") — una sola
+    vez por fecha."""
     db = get_client()
     # Todos los partidos de rondas aún no cerradas del todo (al menos un
     # partido sin resultado) — no solo los partidos sin resultado, porque
@@ -274,8 +276,8 @@ def enviar_recordatorio_faltantes():
         if ronda in ya_notificadas:
             continue
         partidos_ronda_ord = sorted(partidos_ronda, key=lambda p: p["kickoff"])
-        if not any(p["cerrado"] for p in partidos_ronda_ord):
-            continue  # el primer partido de la fecha aún no cerró — no es momento de avisar
+        if not partidos_ronda_ord or not partidos_ronda_ord[0]["cerrado"]:
+            continue  # el 1° partido de la fecha aún no cerró — no es momento de avisar
 
         try:
             db.table("notificaciones_enviadas").insert(
@@ -673,12 +675,45 @@ def sync_logos():
 
 
 def cerrar_por_kickoff():
-    """Cierra (bloquea predicciones) los partidos cuyo kickoff ya pasó, aunque no haya resultado aún."""
+    """Cierra (bloquea predicciones) los partidos según la política de plazo
+    de la fecha: los partidos 1° y 2° de cada fecha se cierran cada uno en
+    SU propio kickoff (igual que antes); del 3° en adelante quedan abiertos
+    hasta el kickoff del 2° partido de esa misma fecha — ahí se cierran
+    todos de golpe, dando a los jugadores el plazo de "2 partidos" para
+    completar toda la fecha en vez de perder cada partido a su propia hora."""
     from datetime import datetime, timezone
     db = get_client()
     ahora = datetime.now(timezone.utc).isoformat()
-    res = db.table("partidos").update({"cerrado": True}).lt("kickoff", ahora).eq("cerrado", False).execute()
-    print(f"{len(res.data)} partidos cerrados por haber iniciado.")
+
+    abiertos = (db.table("partidos").select("id, fecha_ronda, kickoff")
+                .eq("cerrado", False).not_.is_("fecha_ronda", "null").execute().data)
+    por_ronda = {}
+    for p in abiertos:
+        por_ronda.setdefault(p["fecha_ronda"], []).append(p)
+
+    ids_a_cerrar = []
+    for partidos_ronda in por_ronda.values():
+        # Orden dentro de la fecha completa (no solo entre los abiertos):
+        # necesitamos saber cuál es el 1°/2° kickoff HISTÓRICO de la fecha,
+        # aunque esos ya estén cerrados y no aparezcan en `abiertos`.
+        ids_ronda = [p["id"] for p in partidos_ronda]
+        fecha_ronda = partidos_ronda[0]["fecha_ronda"]
+        todos_ronda = (db.table("partidos").select("id, kickoff")
+                       .eq("fecha_ronda", fecha_ronda).execute().data)
+        todos_ord = sorted(todos_ronda, key=lambda p: p["kickoff"])
+        segundo_kickoff = todos_ord[1]["kickoff"] if len(todos_ord) >= 2 else None
+
+        for i, p in enumerate(todos_ord):
+            if p["id"] not in ids_ronda:
+                continue  # ya cerrado, no hace falta reevaluar
+            corte = p["kickoff"] if i < 2 else segundo_kickoff
+            if corte is not None and corte < ahora:
+                ids_a_cerrar.append(p["id"])
+
+    if ids_a_cerrar:
+        db.table("partidos").update({"cerrado": True}).in_("id", ids_a_cerrar).execute()
+    print(f"{len(ids_a_cerrar)} partidos cerrados por haber iniciado (plazo: 1°/2° a su kickoff, "
+          f"3°+ al kickoff del 2°).")
 
 
 if __name__ == "__main__":

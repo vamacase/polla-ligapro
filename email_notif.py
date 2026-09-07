@@ -370,9 +370,10 @@ def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
 def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda,
                                    partidos_pendientes: list[dict], total_fecha: int) -> bool:
     """Solo para jugadores con 0 predicciones en la fecha, enviado justo
-    cuando el primer partido ya cerró. partidos_pendientes: [{"local",
-    "visita", "hora"}, ...] — los que aún puede predecir (ya sin el primero,
-    que quedó cerrado)."""
+    cuando el 1° partido ya cerró (aviso temprano — el plazo real de cierre
+    de la fecha es el kickoff del 2° partido). partidos_pendientes:
+    [{"local", "visita", "hora"}, ...] — los que aún puede predecir (todos
+    menos el 1°, que ya cerró)."""
     partidos_html = "".join(
         f"""<tr>
           <td style="padding:11px 16px; font-size:12px; color:{_FAINT}; white-space:nowrap; width:76px;">{p['hora']}</td>
@@ -384,7 +385,7 @@ def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda
     n_pendientes = len(partidos_pendientes)
     cuerpo = f"""
     <tr><td style="padding-bottom:20px;">
-      <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">Ya arrancó el primer partido de la fecha y todavía no has hecho ningún pronóstico — ese ya no cuenta, pero puedes predecir los {n_pendientes} restantes de {total_fecha}.</span>
+      <span style="font-size:13.5px; color:{_TEXT}; line-height:1.5;">Ya arrancó el primer partido de la fecha y todavía no has hecho ningún pronóstico — ese ya no cuenta, pero puedes predecir los {n_pendientes} restantes de {total_fecha} antes de que también se te cierren.</span>
     </td></tr>
     <tr><td style="padding-bottom:8px;">
       <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Partidos que aún puedes predecir</span>
