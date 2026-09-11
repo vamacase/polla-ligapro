@@ -485,6 +485,7 @@ def vista_predicciones():
             ids = list(valores.keys())
             frescos = {p["id"]: p for p in db().table("partidos").select("id, local, visita, kickoff, cerrado")
                        .in_("id", ids).execute().data}
+            ahora = datetime.now(timezone.utc)
             guardados, rechazados = 0, []
             confirmadas = []
             for partido_id, (gl, gv) in valores.items():
