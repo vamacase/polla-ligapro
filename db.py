@@ -1,12 +1,14 @@
 """Conexión compartida a Supabase para la webapp (Streamlit) y el sync local."""
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from supabase import create_client, Client
 
 RAIZ = Path(__file__).resolve().parent
 
 
 def get_client() -> Client:
+    load_dotenv(RAIZ / ".env")
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_KEY")
     if not url or not key:

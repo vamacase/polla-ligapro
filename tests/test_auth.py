@@ -7,10 +7,11 @@ import db
 from services.auth import hash_pin, read_session, sign_session, validar_pin, verify_pin
 
 
-def test_client_rejects_missing_service_key(monkeypatch):
+def test_client_rejects_missing_service_key(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_KEY", "deprecated-public-key")
+    monkeypatch.setattr(db, "RAIZ", tmp_path)
     streamlit = ModuleType("streamlit")
     streamlit.secrets = {}
     monkeypatch.setitem(sys.modules, "streamlit", streamlit)
@@ -22,6 +23,21 @@ def test_client_rejects_missing_service_key(monkeypatch):
 
     with pytest.raises(RuntimeError, match="SUPABASE_SERVICE_KEY"):
         db.get_client()
+
+
+def test_client_loads_project_dotenv_for_local_scripts(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
+    monkeypatch.setattr(db, "RAIZ", tmp_path)
+    (tmp_path / ".env").write_text(
+        "SUPABASE_URL=https://example.supabase.co\n"
+        "SUPABASE_SERVICE_KEY=service-role-key\n",
+        encoding="utf-8",
+    )
+
+    client = db.get_client()
+
+    assert client is not None
 
 
 def test_pin_hash_uses_scrypt_and_verifies_only_the_right_value():
