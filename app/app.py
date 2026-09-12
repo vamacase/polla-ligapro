@@ -13,7 +13,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
 from email_notif import enviar_confirmacion, enviar_todos_predijeron  # noqa: E402
-from core.scoring import score_display  # noqa: E402
+from core.scoring import add_score_to_ranking, score_display  # noqa: E402
 from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
@@ -611,12 +611,8 @@ def vista_ranking():
         jid = f["jugador_id"]
         acc = agregados.setdefault(
             jid, {"puntos_totales": 0, "aciertos_exactos": 0, "aciertos_1x2": 0, "partidos_predichos": 0})
-        acc["puntos_totales"] += f["puntos"]
-        if f["es_exacto"]:
-            acc["aciertos_exactos"] += 1
-            acc["aciertos_1x2"] += 1
-        elif f["puntos"] == 1:
-            acc["aciertos_1x2"] += 1
+        acc = add_score_to_ranking(acc, points=f["puntos"], exact=f["es_exacto"])
+        agregados[jid] = acc
         acc["partidos_predichos"] += 1
         fecha = ronda_por_partido.get(f["partido_id"])
         if fecha is not None:

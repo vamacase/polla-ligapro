@@ -20,6 +20,8 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from core.scoring import ranking_email_breakdown
+
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
 APP_URL = "https://polla-papers-ligapro.streamlit.app"
@@ -256,8 +258,8 @@ def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
     rank_filas = []
     for i, r in enumerate(ranking):
         destacado = r["nombre"] == jugador_nombre
-        pts_exacto = r.get("exactos", 0)
-        pts_1x2 = r.get("puntos", 0) - pts_exacto
+        pts_exacto, pts_1x2 = ranking_email_breakdown(
+            total_points=r.get("puntos", 0), exact_count=r.get("exactos", 0))
         detalle = f"{pts_exacto} pts exacto · {pts_1x2} pts G/E/P"
         rank_filas.append(f"""<tr style="{'background:' + _ACCENT_SOFT + ';' if destacado else ''}">
           <td style="padding:12px 8px 12px 16px; font-size:{'14px' if destacado else '13px'}; color:{_TEXT if destacado else _FAINT}; white-space:nowrap;">{medallas.get(i, f'#{i + 1}')}</td>
