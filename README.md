@@ -67,7 +67,9 @@ ranking, un exacto suma un acierto en cada columna: `Exacto` y `G/E/P`.
 2. En **SQL Editor**, pega y corre `schema.sql`.
 3. Copia **Project URL** y la **service role key** desde Settings → API,
    exclusivamente para el servidor.
-4. Aplica `migrations/001_security_prepare.sql` para preparar las credenciales.
+4. Aplica `migrations/001_security_prepare.sql` solo si la base ya existía y
+   aún conserva PINs planos. Para una base nueva, `schema.sql` ya crea la
+   estructura segura.
 
 ### 2. Variables de entorno (local)
 
@@ -111,9 +113,11 @@ Para una base existente, aplica primero la preparación y ejecuta una sola vez
 `python scripts/migrate_pin_hashes.py` antes de activar este login. La preparación
 conserva los PIN existentes y permite altas nuevas con solo hash. No repitas el
 script después de cambiar PIN o crear jugadores mediante el flujo nuevo.
-La eliminación del PIN antiguo y el cierre de RLS corresponden a la migración
-de enforcement, después de validar desarrollo. No apliques cambios en producción
-durante una ventana de predicción abierta.
+Después de comprobar que `select count(*) from jugadores where pin_hash is null`
+devuelve cero y validar desarrollo, aplica
+`migrations/002_security_enforce.sql`. Esta operación elimina definitivamente
+el PIN antiguo y bloquea el acceso `anon` y `authenticated`; no la apliques en
+producción durante una ventana de predicción abierta.
 
 La comprobación local sin servicios externos es `python -m pytest -q`.
 En desarrollo, verifica además login, refresco, rechazo de cookie manipulada,

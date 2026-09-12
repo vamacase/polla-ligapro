@@ -4,7 +4,10 @@
 create table if not exists jugadores (
     id serial primary key,
     nombre text unique not null,
-    pin text not null,  -- 4 dígitos, texto para simplicidad
+    pin_hash text not null,
+    session_version integer not null default 1,
+    fallos_pin integer not null default 0,
+    bloqueado_hasta timestamptz,
     email text  -- opcional: para enviar confirmación de predicciones por correo
 );
 
@@ -94,26 +97,13 @@ left join v_puntos vp on vp.jugador_id = j.id
 group by j.id, j.nombre
 order by puntos_totales desc, aciertos_exactos desc;
 
--- RLS: la app usa la anon key (no Supabase Auth); el control de acceso real
--- es el PIN validado en la webapp, no RLS. Se habilita RLS con políticas
--- abiertas para que la anon key pueda leer/escribir estas tablas.
+-- RLS: el navegador no accede a la base. La app y el sync usan exclusivamente
+-- la service role key en el servidor, que conserva su acceso al omitir RLS.
 alter table jugadores enable row level security;
 alter table partidos enable row level security;
 alter table equipos enable row level security;
 alter table predicciones enable row level security;
 alter table notificaciones_enviadas enable row level security;
 
-drop policy if exists jugadores_all on jugadores;
-create policy jugadores_all on jugadores for all using (true) with check (true);
-
-drop policy if exists partidos_all on partidos;
-create policy partidos_all on partidos for all using (true) with check (true);
-
-drop policy if exists equipos_all on equipos;
-create policy equipos_all on equipos for all using (true) with check (true);
-
-drop policy if exists predicciones_all on predicciones;
-create policy predicciones_all on predicciones for all using (true) with check (true);
-
-drop policy if exists notificaciones_enviadas_all on notificaciones_enviadas;
-create policy notificaciones_enviadas_all on notificaciones_enviadas for all using (true) with check (true);
+revoke all privileges on table jugadores, partidos, equipos, predicciones,
+    notificaciones_enviadas from anon, authenticated;
