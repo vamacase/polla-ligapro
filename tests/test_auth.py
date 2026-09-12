@@ -1,11 +1,16 @@
 from services.auth import hash_pin, read_session, sign_session, verify_pin
 
 
-def test_pin_hash_never_contains_the_pin_and_verifies_only_the_right_value():
+def test_pin_hash_uses_scrypt_and_verifies_only_the_right_value():
     encoded = hash_pin("1234")
-    assert "1234" not in encoded
+    assert encoded.startswith("scrypt$16384$8$1$")
     assert verify_pin("1234", encoded)
     assert not verify_pin("9999", encoded)
+
+
+def test_pin_hash_handles_values_in_the_required_encoding_prefix():
+    encoded = hash_pin("scrypt")
+    assert verify_pin("scrypt", encoded)
 
 
 def test_session_rejects_tampering_and_expiry():

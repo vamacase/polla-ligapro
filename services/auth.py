@@ -16,15 +16,12 @@ _DIGEST_BYTES = 64
 
 def hash_pin(pin: str) -> str:
     """Return a salted scrypt hash for a player PIN."""
-    while True:
-        salt = secrets.token_bytes(_SALT_BYTES)
-        digest = _scrypt(pin, salt)
-        encoded = "scrypt$16384$8$1${}${}".format(
-            base64.b64encode(salt).decode("ascii"),
-            base64.b64encode(digest).decode("ascii"),
-        )
-        if not pin or pin not in encoded:
-            return encoded
+    salt = secrets.token_bytes(_SALT_BYTES)
+    digest = _scrypt(pin, salt)
+    return "scrypt$16384$8$1${}${}".format(
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(digest).decode("ascii"),
+    )
 
 
 def verify_pin(pin: str, encoded: str) -> bool:
