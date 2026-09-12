@@ -2,7 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Mostrar y calcular de forma verificable 2 puntos por marcador exacto, 1 por 1X2 y 0 por fallo.
+**Goal:** Mostrar y calcular de forma verificable que un exacto suma 1 por
+Exacto y 1 por G/E/P (2 total), un G/E/P no exacto suma 1 y un fallo 0.
 
 **Architecture:** La vista SQL `v_puntos` conserva el cálculo de producción. Un módulo Python puro centraliza etiquetas de resultado para la app y evita textos contradictorios; sus pruebas no necesitan Streamlit ni Supabase.
 
@@ -13,7 +14,8 @@
 ## Global Constraints
 
 - No modificar predicciones ni resultados existentes.
-- Marcador exacto = 2; 1X2 correcto no exacto = 1; fallo = 0.
+- Marcador exacto = 1 por Exacto + 1 por G/E/P (total 2); G/E/P correcto no
+  exacto = 1; fallo = 0.
 - Las pruebas unitarias no contactan Supabase, Gmail ni SofaScore.
 - Todo texto visible y README debe usar la misma regla.
 
@@ -28,7 +30,7 @@
 - Create: `tests/test_scoring.py`
 
 **Interfaces:**
-- Produces: `ScoreDisplay(label: str, css_class: str)` y `score_display(points: int | None, exact: bool | None) -> ScoreDisplay`.
+- Produces: `ScoreDisplay(label, css_class, total_points, exact_points, result_points)` y `score_display(points: int | None, exact: bool | None) -> ScoreDisplay`.
 - Produces: una suite `pytest` ejecutable con `pytest -q`.
 
 - [ ] **Step 1: Escribir las pruebas que fallan**
@@ -36,11 +38,11 @@
 ```python
 from core.scoring import score_display
 
-def test_exact_score_is_two_points_and_uses_exact_label():
-    assert score_display(2, True).label == "Exacto · +2"
+def test_exact_score_breaks_two_total_points_into_exact_and_result_components():
+    assert score_display(2, True).label == "Exacto +1 · G/E/P +1 · Total +2"
 
-def test_1x2_score_has_its_own_label():
-    assert score_display(1, False).label == "1X2 · +1"
+def test_non_exact_correct_result_only_awards_the_result_component():
+    assert score_display(1, False).label == "G/E/P +1"
 
 def test_pending_and_failed_scores_are_explicit():
     assert score_display(None, None).label == "Pendiente"
@@ -63,14 +65,17 @@ from dataclasses import dataclass
 class ScoreDisplay:
     label: str
     css_class: str
+    total_points: int | None
+    exact_points: int | None
+    result_points: int | None
 
 def score_display(points: int | None, exact: bool | None) -> ScoreDisplay:
     if points is None:
         return ScoreDisplay("Pendiente", "polla-pill--na")
     if points == 2 and exact:
-        return ScoreDisplay("Exacto · +2", "polla-pill--exacto")
+        return ScoreDisplay("Exacto +1 · G/E/P +1 · Total +2", "polla-pill--exacto")
     if points == 1 and not exact:
-        return ScoreDisplay("1X2 · +1", "polla-pill--1x2")
+        return ScoreDisplay("G/E/P +1", "polla-pill--1x2")
     return ScoreDisplay("Fallo · +0", "polla-pill--fallo")
 ```
 
@@ -106,7 +111,7 @@ from core.scoring import score_display
 def test_exact_display_uses_exact_css_class():
     display = score_display(2, True)
     assert display.css_class == "polla-pill--exacto"
-    assert "+2" in display.label
+    assert "Exacto +1 · G/E/P +1" in display.label
 ```
 
 - [ ] **Step 2: Ejecutar la prueba y confirmar el estado rojo inicial**
@@ -124,8 +129,8 @@ def pill_puntos(puntos, es_exacto=None) -> str:
     return f'<span class="polla-pill {display.css_class}">{display.label}</span>'
 ```
 
-Cambiar el pie de predicción a: `2 pts por marcador exacto; 1 pt por acertar
-G/E/P con marcador distinto; 0 si fallas.` Actualizar README y los comentarios
+Cambiar el pie de predicción para desglosar un exacto como `1 pt por Exacto + 1
+pt por G/E/P (2 pts total)`, y un G/E/P no exacto como 1 punto. Actualizar README y los comentarios
 de `schema.sql` con la misma tabla de tres casos; no alterar el `CASE` SQL que
 ya devuelve 2/1/0.
 

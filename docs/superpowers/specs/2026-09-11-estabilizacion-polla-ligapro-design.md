@@ -7,7 +7,8 @@
 
 Convertir la aplicación de una solución funcional para un grupo pequeño en
 una aplicación confiable para operar fechas reales, sin cambiar sus reglas de
-juego: marcador exacto vale 2 puntos, acierto de 1X2 vale 1 punto y los
+juego: marcador exacto suma 1 punto por Exacto y 1 por G/E/P (2 en total),
+y un acierto de G/E/P no exacto vale 1 punto. Los
 partidos 3 en adelante cierran en el kickoff del segundo partido de la fecha.
 
 La estabilización cubre cuatro resultados:
@@ -57,9 +58,9 @@ La fuente de verdad continuará siendo la vista SQL `v_puntos`:
 
 | Caso | Puntos |
 |---|---:|
-| Marcador exacto | 2 |
-| Resultado 1X2 correcto, marcador distinto | 1 |
-| Incorrecto | 0 |
+| Marcador exacto | Exacto: 1 + G/E/P: 1 = 2 |
+| Resultado G/E/P correcto, marcador distinto | Exacto: 0 + G/E/P: 1 = 1 |
+| Incorrecto | Exacto: 0 + G/E/P: 0 = 0 |
 
 Se creará un pequeño módulo puro `core/scoring.py` que define las etiquetas y
 la representación de los tres resultados para la interfaz y el correo. La
@@ -163,7 +164,8 @@ Los datos de predicciones y resultados existentes no cambian.
 
 ## Pruebas y criterios de aceptación
 
-- Puntaje: exacto=2, 1X2=1, fallo=0, incluidos empate y goles iguales.
+- Puntaje: exacto=1 por Exacto + 1 por G/E/P (total 2), G/E/P no exacto=1,
+  fallo=0, incluidos empate y goles iguales.
 - Plazos: primera, segunda y tercera posición; ambos lados exactos del corte;
   corrección posterior de kickoff.
 - Seguridad: cookie manipulada, cookie vencida, PIN erróneo repetido, cambio

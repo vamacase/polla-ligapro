@@ -435,7 +435,7 @@ def vista_predicciones():
         return
 
     mis_pred = cargar_predicciones(jugador_id)
-    st.caption("2 pts por marcador exacto; 1 pt por acertar G/E/P con marcador distinto; 0 si fallas.")
+    st.caption("Marcador exacto: 1 pt por Exacto + 1 pt por G/E/P (2 pts total); G/E/P no exacto: 1 pt; fallo: 0.")
 
     rondas = sorted({p["fecha_ronda"] for p in partidos}, key=lambda r: (r is None, r))
     ronda_sel = selector_fecha(rondas, key="ronda_pred")
@@ -612,8 +612,11 @@ def vista_ranking():
         acc = agregados.setdefault(
             jid, {"puntos_totales": 0, "aciertos_exactos": 0, "aciertos_1x2": 0, "partidos_predichos": 0})
         acc["puntos_totales"] += f["puntos"]
-        acc["aciertos_exactos"] += 1 if f["es_exacto"] else 0
-        acc["aciertos_1x2"] += 1 if f["puntos"] == 1 and not f["es_exacto"] else 0
+        if f["es_exacto"]:
+            acc["aciertos_exactos"] += 1
+            acc["aciertos_1x2"] += 1
+        elif f["puntos"] == 1:
+            acc["aciertos_1x2"] += 1
         acc["partidos_predichos"] += 1
         fecha = ronda_por_partido.get(f["partido_id"])
         if fecha is not None:
@@ -649,9 +652,9 @@ def vista_ranking():
             "Jugador": st.column_config.TextColumn(width="medium"),
             "Ptos": st.column_config.NumberColumn(width="small"),
             COL_EXACTO: st.column_config.NumberColumn(
-                width="small", help="Cantidad de marcadores exactos (2 puntos cada uno)"),
+                width="small", help="Puntos por marcador exacto (1 por acierto)"),
             COL_1X2: st.column_config.NumberColumn(
-                width="small", help="Cantidad de aciertos G/E/P (1 punto cada uno)"),
+                width="small", help="Puntos por G/E/P (1 por acierto)"),
         })
 
     st.markdown("#### Puntos por fecha")

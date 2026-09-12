@@ -56,10 +56,10 @@ create table if not exists notificaciones_enviadas (
     unique (fecha_ronda, tipo)
 );
 
--- Vista de puntaje por predicción: 2 = marcador exacto; 1 = acierta G/E/P
--- con marcador distinto; 0 = falla. es_exacto se guarda aparte para
--- desempate en el ranking y para que la app muestre cuál fue marcador exacto
--- vs. solo 1X2.
+-- Vista de puntaje por predicción: un marcador exacto suma 1 por Exacto y 1
+-- por G/E/P (total 2); un G/E/P correcto no exacto suma 1; un fallo suma 0.
+-- es_exacto se guarda aparte para desempate y para que la app desglose ambos
+-- componentes del marcador exacto.
 create or replace view v_puntos as
 select
     p.id as prediccion_id,

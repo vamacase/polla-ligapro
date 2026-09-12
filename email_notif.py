@@ -225,7 +225,7 @@ def _fila_resultado_con_prediccion(r: dict) -> str:
         pred_html = (f'<span style="font-size:12.5px; color:{_MUTED};">tu predicción: '
                      f'<b style="color:{_TEXT};">{gl_pred}–{gv_pred}</b></span>')
         if r.get("es_exacto"):
-            icono = f"✅✅ +{puntos} pts"
+            icono = "✅ Exacto +1 · G/E/P +1 = +2 pts"
         elif puntos == 1:
             icono = f"✅ +{puntos} pto"
         else:
@@ -256,7 +256,7 @@ def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
     rank_filas = []
     for i, r in enumerate(ranking):
         destacado = r["nombre"] == jugador_nombre
-        pts_exacto = r.get("exactos", 0) * 2
+        pts_exacto = r.get("exactos", 0)
         pts_1x2 = r.get("puntos", 0) - pts_exacto
         detalle = f"{pts_exacto} pts exacto · {pts_1x2} pts G/E/P"
         rank_filas.append(f"""<tr style="{'background:' + _ACCENT_SOFT + ';' if destacado else ''}">

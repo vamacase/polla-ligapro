@@ -50,13 +50,14 @@ nunca se mezclan** porque cada ambiente tiene su propio proyecto Supabase.
 
 ## Puntaje
 
-- **2 puntos**: aciertas el marcador exacto (ej. predices 2-1 y el resultado
-  real es 2-1).
-- **1 punto**: aciertas G/E/P, pero el marcador es distinto.
-- **0 puntos**: fallas el resultado.
+- **Marcador exacto**: **1 punto por Exacto** y **1 punto por G/E/P**; total
+  **2 puntos** (ej. predices 2-1 y el resultado real es 2-1).
+- **G/E/P no exacto**: **0 puntos por Exacto** y **1 punto por G/E/P**;
+  total **1 punto**.
+- **Fallo**: **0 puntos**.
 
-La columna `es_exacto` en `v_puntos` distingue el marcador exacto del acierto
-de solo 1X2, tanto para el desempate del ranking como para mostrarlo en la app.
+La columna `es_exacto` en `v_puntos` distingue el marcador exacto. En el
+ranking, un exacto suma un acierto en cada columna: `Exacto` y `G/E/P`.
 
 ## Setup inicial
 
