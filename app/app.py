@@ -648,8 +648,10 @@ def vista_ranking():
             "Puesto": st.column_config.TextColumn(width="small"),
             "Jugador": st.column_config.TextColumn(width="medium"),
             "Ptos": st.column_config.NumberColumn(width="small"),
-            COL_EXACTO: st.column_config.NumberColumn(width="small", help="Puntos por resultado exacto"),
-            COL_1X2: st.column_config.NumberColumn(width="small", help="Puntos por acertar Gana/Empata/Pierde"),
+            COL_EXACTO: st.column_config.NumberColumn(
+                width="small", help="Cantidad de marcadores exactos (2 puntos cada uno)"),
+            COL_1X2: st.column_config.NumberColumn(
+                width="small", help="Cantidad de aciertos G/E/P (1 punto cada uno)"),
         })
 
     st.markdown("#### Puntos por fecha")
