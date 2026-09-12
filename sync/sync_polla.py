@@ -42,6 +42,7 @@ print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV
 
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
 from db import get_client  # noqa: E402
+from services.predictions import refresh_round_deadlines  # noqa: E402
 from email_notif import (  # noqa: E402
     enviar_fecha_terminada, enviar_recordatorio_60min,
     enviar_recordatorio_faltantes as enviar_recordatorio_faltantes_email,
@@ -68,6 +69,7 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
         return
 
     db = get_client()
+    rondas_actualizadas = set()
     for p in partidos:
         fila = {
             "event_id": p["event_id"],
@@ -80,7 +82,11 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
             "cerrado": False,
         }
         db.table("partidos").upsert(fila, on_conflict="event_id").execute()
+        if p["ronda"] is not None:
+            rondas_actualizadas.add(p["ronda"])
         print(f"  [ok] {p['local']} vs {p['visitante']}  (ronda {p['ronda']}, {p['fecha']})")
+    for ronda_actualizada in rondas_actualizadas:
+        refresh_round_deadlines(db, ronda_actualizada)
     print(f"\n{len(partidos)} partidos sincronizados a Supabase.")
 
 
@@ -429,10 +435,12 @@ def sync_resultados(anio=2026):
         return
     ids_pendientes = {p["event_id"] for p in pendientes}
     kickoff_actual = {p["event_id"]: p["kickoff"] for p in pendientes}
+    ronda_por_evento = {p["event_id"]: p["fecha_ronda"] for p in pendientes}
     print(f"Partidos pendientes de resultado: {len(ids_pendientes)}")
 
     actualizados = 0
     kickoffs_corregidos = 0
+    rondas_con_kickoff_corregido = set()
     with SofaScore() as sofa:
         pagina = 0
         while True:
@@ -481,6 +489,8 @@ def sync_resultados(anio=2026):
                     kickoff_real = dt_real.isoformat()
                     db.table("partidos").update({"kickoff": kickoff_real}).eq("event_id", eid).execute()
                     kickoffs_corregidos += 1
+                    if ronda_por_evento[eid] is not None:
+                        rondas_con_kickoff_corregido.add(ronda_por_evento[eid])
                     print(f"  [kickoff] {ev['homeTeam']['name']} vs {ev['awayTeam']['name']}: "
                           f"{kickoff_actual.get(eid)} -> {kickoff_real}")
             if not r.get("hasNextPage") or not evs:
@@ -490,6 +500,8 @@ def sync_resultados(anio=2026):
 
     print(f"\n{actualizados} partidos actualizados con resultado real.")
     if kickoffs_corregidos:
+        for ronda_corregida in rondas_con_kickoff_corregido:
+            refresh_round_deadlines(db, ronda_corregida)
         print(f"{kickoffs_corregidos} kickoffs corregidos con el horario real de SofaScore.")
 
 
@@ -685,30 +697,12 @@ def cerrar_por_kickoff():
     db = get_client()
     ahora = datetime.now(timezone.utc).isoformat()
 
-    abiertos = (db.table("partidos").select("id, fecha_ronda, kickoff")
-                .eq("cerrado", False).not_.is_("fecha_ronda", "null").execute().data)
-    por_ronda = {}
-    for p in abiertos:
-        por_ronda.setdefault(p["fecha_ronda"], []).append(p)
-
-    ids_a_cerrar = []
-    for partidos_ronda in por_ronda.values():
-        # Orden dentro de la fecha completa (no solo entre los abiertos):
-        # necesitamos saber cuál es el 1°/2° kickoff HISTÓRICO de la fecha,
-        # aunque esos ya estén cerrados y no aparezcan en `abiertos`.
-        ids_ronda = [p["id"] for p in partidos_ronda]
-        fecha_ronda = partidos_ronda[0]["fecha_ronda"]
-        todos_ronda = (db.table("partidos").select("id, kickoff")
-                       .eq("fecha_ronda", fecha_ronda).execute().data)
-        todos_ord = sorted(todos_ronda, key=lambda p: p["kickoff"])
-        segundo_kickoff = todos_ord[1]["kickoff"] if len(todos_ord) >= 2 else None
-
-        for i, p in enumerate(todos_ord):
-            if p["id"] not in ids_ronda:
-                continue  # ya cerrado, no hace falta reevaluar
-            corte = p["kickoff"] if i < 2 else segundo_kickoff
-            if corte is not None and corte < ahora:
-                ids_a_cerrar.append(p["id"])
+    abiertos = (db.table("partidos").select("id, cierre_predicciones")
+                .eq("cerrado", False).execute().data)
+    ids_a_cerrar = [
+        partido["id"] for partido in abiertos
+        if partido["cierre_predicciones"] <= ahora
+    ]
 
     if ids_a_cerrar:
         db.table("partidos").update({"cerrado": True}).in_("id", ids_a_cerrar).execute()

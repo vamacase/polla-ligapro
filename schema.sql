@@ -22,7 +22,8 @@ create table if not exists partidos (
     visita_id bigint,
     gl_real int,                        -- goles local reales (null hasta jugarse)
     gv_real int,                        -- goles visita reales (null hasta jugarse)
-    cerrado boolean not null default false  -- true = ya no se puede predecir
+    cerrado boolean not null default false,  -- true = ya no se puede predecir
+    cierre_predicciones timestamptz not null
 );
 
 create table if not exists equipos (

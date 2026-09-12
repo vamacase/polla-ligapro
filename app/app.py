@@ -18,6 +18,7 @@ from core.scoring import add_score_to_ranking, score_display  # noqa: E402
 from services.auth import (  # noqa: E402
     autenticar_jugador, cambiar_pin, jugador_de_sesion, sign_session, validar_pin,
 )
+from services.predictions import save_prediction  # noqa: E402
 from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
@@ -395,7 +396,7 @@ def cargar_partidos_abiertos():
     abiertos hasta el kickoff del 2°) puede haber partidos con kickoff ya
     pasado que siguen legítimamente abiertos."""
     return (db().table("partidos").select("*")
-            .eq("cerrado", False)
+            .gt("cierre_predicciones", datetime.now(timezone.utc).isoformat())
             .order("kickoff").execute().data)
 
 
@@ -420,7 +421,7 @@ def tarjeta_partido(p, mis_pred):
         with c_info:
             st.markdown(f'<div class="polla-fila-hora">{kickoff_local}</div>', unsafe_allow_html=True)
         with c_badge:
-            st.markdown(badge_cuenta_regresiva(p["kickoff"]), unsafe_allow_html=True)
+            st.markdown(badge_cuenta_regresiva(p["cierre_predicciones"]), unsafe_allow_html=True)
 
         st.markdown(
             f'<div class="polla-fila-equipo">{logo(p.get("local_id"), 22)}<span>{p["local"]}</span></div>',
@@ -495,28 +496,26 @@ def vista_predicciones():
 
         enviado = st.form_submit_button("Guardar predicciones", type="primary")
         if enviado:
-            # Revalidar contra el estado real al momento del envío: el
-            # formulario pudo abrirse minutos antes, y "cerrado" pudo
-            # actualizarse mientras tanto (cerrar_por_kickoff() en sync).
-            # Se confía solo en `cerrado`, no en kickoff <= ahora — bajo la
-            # política de plazo, un partido 3°+ con kickoff ya pasado puede
-            # seguir legítimamente abierto hasta que cierre el 2°.
+            # La RPC de Postgres decide con su propio reloj si el plazo sigue
+            # abierto, aunque el formulario se haya cargado antes o el sync
+            # todavía no haya actualizado `cerrado`.
             ids = list(valores.keys())
-            frescos = {p["id"]: p for p in db().table("partidos").select("id, local, visita, kickoff, cerrado")
+            frescos = {p["id"]: p for p in db().table("partidos").select("id, local, visita")
                        .in_("id", ids).execute().data}
-            ahora = datetime.now(timezone.utc)
             guardados, rechazados = 0, []
             confirmadas = []
             for partido_id, (gl, gv) in valores.items():
                 p = frescos.get(partido_id)
-                if not p or p["cerrado"]:
+                if not p:
                     rechazados.append(p["local"] + " vs " + p["visita"] if p else f"partido {partido_id}")
                     continue
-                db().table("predicciones").upsert({
-                    "jugador_id": jugador_id, "partido_id": partido_id,
-                    "gl_pred": int(gl), "gv_pred": int(gv),
-                    "actualizado_en": ahora.isoformat(),
-                }, on_conflict="jugador_id,partido_id").execute()
+                try:
+                    save_prediction(db(), jugador_id, partido_id, gl, gv)
+                except Exception as error:
+                    if "plazo cerrado" in str(error).lower():
+                        rechazados.append(p["local"] + " vs " + p["visita"])
+                        continue
+                    raise
                 guardados += 1
                 confirmadas.append({"local": p["local"], "visita": p["visita"], "gl": int(gl), "gv": int(gv)})
 

@@ -119,6 +119,10 @@ devuelve cero y validar desarrollo, aplica
 el PIN antiguo y bloquea el acceso `anon` y `authenticated`; no la apliques en
 producción durante una ventana de predicción abierta.
 
+Aplica también `migrations/003_prediction_deadlines.sql` antes de desplegar el
+guardado de pronósticos. Añade el cierre por partido y una función de base de
+datos que rechaza cualquier pronóstico enviado después de su plazo.
+
 La comprobación local sin servicios externos es `python -m pytest -q`.
 En desarrollo, verifica además login, refresco, rechazo de cookie manipulada,
 bloqueo al quinto fallo, cambio de PIN y ausencia de credenciales en el panel.
