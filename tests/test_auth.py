@@ -1,16 +1,27 @@
+import sys
+from types import ModuleType
+
 import pytest
 
-from db import get_client
+import db
 from services.auth import hash_pin, read_session, sign_session, verify_pin
 
 
 def test_client_rejects_missing_service_key(monkeypatch):
     monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
-    monkeypatch.delenv("SUPABASE_KEY", raising=False)
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_KEY", "deprecated-public-key")
+    streamlit = ModuleType("streamlit")
+    streamlit.secrets = {}
+    monkeypatch.setitem(sys.modules, "streamlit", streamlit)
+
+    def create_client_must_not_run(*_args, **_kwargs):
+        raise AssertionError("create_client must not receive SUPABASE_KEY")
+
+    monkeypatch.setattr(db, "create_client", create_client_must_not_run)
 
     with pytest.raises(RuntimeError, match="SUPABASE_SERVICE_KEY"):
-        get_client()
+        db.get_client()
 
 
 def test_pin_hash_uses_scrypt_and_verifies_only_the_right_value():
