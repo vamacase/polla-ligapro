@@ -1,4 +1,16 @@
+import pytest
+
+from db import get_client
 from services.auth import hash_pin, read_session, sign_session, verify_pin
+
+
+def test_client_rejects_missing_service_key(monkeypatch):
+    monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="SUPABASE_SERVICE_KEY"):
+        get_client()
 
 
 def test_pin_hash_uses_scrypt_and_verifies_only_the_right_value():
