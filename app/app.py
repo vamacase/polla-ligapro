@@ -1,5 +1,6 @@
 """Polla Liga Pro Ecuador — webapp Streamlit (predicciones + ranking entre amigos)."""
 import os
+import hmac
 import sys
 import time
 from pathlib import Path
@@ -14,11 +15,16 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
 from email_notif import enviar_confirmacion, enviar_todos_predijeron  # noqa: E402
 from core.scoring import add_score_to_ranking, score_display  # noqa: E402
+from services.auth import (  # noqa: E402
+    autenticar_jugador, cambiar_pin, jugador_de_sesion, sign_session, validar_pin,
+)
 from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
 
 DIAS_SESION = 30
+COOKIE_SESION = "polla_sesion"
+ERROR_ACCESO = "No se pudo iniciar sesión. Revisa tus datos o inténtalo más tarde."
 
 
 def cookies():
@@ -315,14 +321,37 @@ def intentar_notificar_todos_predijeron(ronda):
         enviar_todos_predijeron(destinatarios, ronda, cuerpo)
 
 
-def get_admin_pin():
-    pin = os.environ.get("ADMIN_PIN")
-    if not pin:
+def get_secret(name):
+    value = os.environ.get(name)
+    if not value:
         try:
-            pin = st.secrets["ADMIN_PIN"]
-        except Exception:
-            pin = None
-    return pin
+            value = st.secrets[name]
+        except (KeyError, FileNotFoundError):
+            value = None
+    return value
+
+
+def get_session_secret():
+    secret = get_secret("SESSION_SECRET")
+    if not secret:
+        raise RuntimeError("Falta configurar SESSION_SECRET en el servidor.")
+    return secret
+
+
+def crear_sesion_jugador(player):
+    token = sign_session(player["id"], player["session_version"],
+                         int(time.time()) + DIAS_SESION * 86400, get_session_secret())
+    cookies().set(COOKIE_SESION, token, max_age=DIAS_SESION * 86400,
+                  same_site="strict")
+    st.session_state["sesion_token"] = token
+    st.session_state["jugador_id"] = player["id"]
+    st.session_state["jugador_nombre"] = player["nombre"]
+    st.session_state.pop("es_admin", None)
+
+
+def limpiar_sesion():
+    for key in ("sesion_token", "jugador_id", "jugador_nombre", "es_admin"):
+        st.session_state.pop(key, None)
 
 
 def login():
@@ -339,12 +368,10 @@ def login():
         nombre = st.selectbox("¿Quién eres?", nombres)
         pin = st.text_input("PIN", type="password", max_chars=4)
         if st.button("Entrar", type="primary"):
-            fila = db().table("jugadores").select("id, pin").eq("nombre", nombre).single().execute().data
-            if fila and str(fila["pin"]) == pin:
-                st.session_state["jugador_id"] = fila["id"]
-                st.session_state["jugador_nombre"] = nombre
-                cookies().set("polla_jugador_id", str(fila["id"]),
-                               max_age=DIAS_SESION * 24 * 3600)
+            get_session_secret()
+            fila = autenticar_jugador(db(), nombre, pin)
+            if fila:
+                crear_sesion_jugador(fila)
                 # El componente de cookies escribe en el navegador de forma
                 # asíncrona (vía su iframe interno) — sin esta pausa, el
                 # rerun cortaba el ciclo antes de que la cookie llegara a
@@ -352,7 +379,7 @@ def login():
                 time.sleep(0.5)
                 st.rerun()
             else:
-                st.error("PIN incorrecto.")
+                st.error(ERROR_ACCESO)
 
     st.markdown(
         f'<div style="text-align:center; color:var(--polla-muted); font-size:0.75em; margin-top:1rem">'
@@ -871,7 +898,7 @@ def vista_mis_predicciones():
 def vista_admin():
     st.subheader("🛠️ Panel de Administrador")
 
-    jugadores = db().table("jugadores").select("id, nombre, pin, email").order("nombre").execute().data
+    jugadores = db().table("jugadores").select("id, nombre, email").order("nombre").execute().data
     partidos = db().table("partidos").select("*").order("kickoff").execute().data
 
     if not partidos:
@@ -923,7 +950,7 @@ def vista_admin():
     st.dataframe(pd.DataFrame(filas_check), width="stretch", hide_index=True)
 
     st.markdown("#### Lista de jugadores")
-    st.dataframe(pd.DataFrame([{"Jugador": j["nombre"], "PIN": j["pin"]} for j in jugadores]),
+    st.dataframe(pd.DataFrame([{"Jugador": j["nombre"], "Correo": j["email"] or ""} for j in jugadores]),
                  width="stretch", hide_index=True)
 
     st.markdown("#### Correos para confirmación de predicciones")
@@ -941,25 +968,36 @@ def vista_admin():
 
 
 def restaurar_sesion_desde_cookie():
-    """Si el navegador trae la cookie de sesión (dura DIAS_SESION), reingresa
-    al jugador sin pedirle PIN otra vez — evita re-login en cada visita."""
+    """Restore only a signed, unexpired token with a current database version."""
     try:
-        jugador_id = cookies().get("polla_jugador_id")
+        token = cookies().get(COOKIE_SESION)
     except TypeError:
         # El componente de cookies aún no resolvió su valor real en este
         # rerun (queda None en vez de {} de forma transitoria) — se
         # intenta de nuevo en el siguiente rerun natural de Streamlit.
         return
-    if not jugador_id:
+    if not token:
         return
-    fila = db().table("jugadores").select("id, nombre").eq("id", jugador_id).execute().data
+    fila = jugador_de_sesion(db(), token, get_session_secret(), int(time.time()))
     if fila:
-        st.session_state["jugador_id"] = fila[0]["id"]
-        st.session_state["jugador_nombre"] = fila[0]["nombre"]
+        st.session_state["sesion_token"] = token
+        st.session_state["jugador_id"] = fila["id"]
+        st.session_state["jugador_nombre"] = fila["nombre"]
+        st.session_state.pop("es_admin", None)
+    else:
+        limpiar_sesion()
+        cookies().remove(COOKIE_SESION)
 
 
 def main():
-    if "jugador_id" not in st.session_state:
+    token = st.session_state.get("sesion_token")
+    if token:
+        # Revalidate active tabs as well as browser refreshes after PIN revocation.
+        if not jugador_de_sesion(db(), token, get_session_secret(), int(time.time())):
+            limpiar_sesion()
+            cookies().remove(COOKIE_SESION)
+    else:
+        limpiar_sesion()
         restaurar_sesion_desde_cookie()
     if "jugador_id" not in st.session_state:
         login()
@@ -985,10 +1023,8 @@ def main():
     with st.sidebar:
         st.write(f"Sesión: **{st.session_state['jugador_nombre']}**")
         if st.button("Cerrar sesión"):
-            del st.session_state["jugador_id"]
-            del st.session_state["jugador_nombre"]
-            st.session_state.pop("es_admin", None)
-            cookies().remove("polla_jugador_id")
+            limpiar_sesion()
+            cookies().remove(COOKIE_SESION)
             # Misma condición de carrera que en login(): sin esta pausa, el
             # rerun corta el ciclo antes de que el navegador borre la cookie.
             time.sleep(0.5)
@@ -996,14 +1032,16 @@ def main():
 
         if not es_admin:
             with st.expander("Acceso Administrador"):
-                admin_pin = st.text_input("PIN de administrador", type="password",
-                                           max_chars=4, key="admin_pin_input")
+                admin_password = st.text_input("Contraseña de administrador", type="password",
+                                               key="admin_password_input")
                 if st.button("Ingresar como admin"):
-                    if get_admin_pin() and admin_pin == get_admin_pin():
+                    expected = get_secret("ADMIN_PASSWORD")
+                    if (expected and len(expected) >= 16
+                            and hmac.compare_digest(admin_password.encode(), expected.encode())):
                         st.session_state["es_admin"] = True
                         st.rerun()
                     else:
-                        st.error("PIN de administrador incorrecto.")
+                        st.error(ERROR_ACCESO)
         else:
             st.success("Sesión de administrador activa")
 
@@ -1013,18 +1051,19 @@ def main():
                 pin_nuevo = st.text_input("PIN nuevo (4 dígitos)", type="password", max_chars=4)
                 pin_nuevo2 = st.text_input("Repite el PIN nuevo", type="password", max_chars=4)
                 if st.form_submit_button("Actualizar PIN"):
-                    fila = (db().table("jugadores").select("pin")
-                            .eq("id", st.session_state["jugador_id"]).single().execute().data)
-                    if not fila or str(fila["pin"]) != pin_actual:
-                        st.error("El PIN actual no es correcto.")
-                    elif not (pin_nuevo.isdigit() and len(pin_nuevo) == 4):
+                    if not validar_pin(pin_nuevo):
                         st.error("El PIN nuevo debe ser de 4 dígitos.")
                     elif pin_nuevo != pin_nuevo2:
                         st.error("Los PIN nuevos no coinciden.")
                     else:
-                        db().table("jugadores").update({"pin": pin_nuevo}).eq(
-                            "id", st.session_state["jugador_id"]).execute()
-                        st.success("PIN actualizado.")
+                        fila = cambiar_pin(db(), st.session_state["jugador_id"], pin_actual, pin_nuevo)
+                        if fila:
+                            crear_sesion_jugador(fila)
+                            st.success("PIN actualizado.")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error(ERROR_ACCESO)
 
 
 if __name__ == "__main__":

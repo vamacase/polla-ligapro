@@ -39,7 +39,7 @@ cerrar resultados reales, dar de alta un jugador real) hay que agregar
 ```bash
 python sync_polla.py fixture --prod        # actualiza la POLLA REAL
 python sync_polla.py resultados --prod
-python admin_jugadores.py agregar "Nombre Apellido" 1234 --prod
+python admin_jugadores.py agregar "Nombre Apellido" --prod
 ```
 
 Sin `--prod`, estos mismos comandos operan sobre la base de desarrollo — sirve
@@ -65,24 +65,59 @@ ranking, un exacto suma un acierto en cada columna: `Exacto` y `G/E/P`.
 
 1. Crea proyecto en https://supabase.com.
 2. En **SQL Editor**, pega y corre `schema.sql`.
-3. Copia **Project URL** y **anon public key** desde Settings → API.
+3. Copia **Project URL** y la **service role key** desde Settings → API,
+   exclusivamente para el servidor.
+4. Aplica `migrations/001_security_prepare.sql` para preparar las credenciales.
 
 ### 2. Variables de entorno (local)
 
 ```bash
 cp .env.example .env
-# edita .env con SUPABASE_URL y SUPABASE_KEY
+# edita .env con SUPABASE_URL, SUPABASE_SERVICE_KEY, SESSION_SECRET y ADMIN_PASSWORD
 pip install -r requirements.txt
 ```
 
 ### 3. Dar de alta a los jugadores
 
 ```bash
-python admin_jugadores.py agregar "Juan Perez" 1234
-python admin_jugadores.py agregar "Maria Lopez" 5678
+python admin_jugadores.py agregar "Juan Perez"
+python admin_jugadores.py agregar "Maria Lopez"
 # ... uno por cada amigo (10 en total)
 python admin_jugadores.py listar
 ```
+
+El comando solicita el PIN dos veces sin mostrarlo ni guardarlo en el historial
+de comandos. Guarda únicamente su hash scrypt. Si el nombre ya existe,
+reemplaza el PIN e invalida las sesiones previas. `listar` y el panel muestran
+solo nombre y correo.
+
+### Credenciales y sesiones
+
+Configura `SESSION_SECRET` como un secreto aleatorio largo y `ADMIN_PASSWORD`
+como una contraseña fuerte de al menos 16 caracteres. La app no acepta
+`ADMIN_PIN` ni `SUPABASE_KEY`. Nunca publiques la service key ni estos secretos.
+
+Los jugadores mantienen PIN de cuatro dígitos. Cinco intentos fallidos
+consecutivos bloquean el acceso durante 15 minutos; un acceso correcto o el
+vencimiento del bloqueo reinicia el contador. Cambiar el PIN también está
+sujeto a ese bloqueo y revoca todas las sesiones anteriores.
+
+La cookie firmada dura 30 días. Firma, vencimiento y versión en la base se
+verifican al restaurarla y en cada interacción de la sesión abierta. Las
+cookies antiguas que contenían solo el ID ya no dan acceso. Rotar
+`SESSION_SECRET` cierra las sesiones existentes.
+
+Para una base existente, aplica primero la preparación y ejecuta una sola vez
+`python scripts/migrate_pin_hashes.py` antes de activar este login. La preparación
+conserva los PIN existentes y permite altas nuevas con solo hash. No repitas el
+script después de cambiar PIN o crear jugadores mediante el flujo nuevo.
+La eliminación del PIN antiguo y el cierre de RLS corresponden a la migración
+de enforcement, después de validar desarrollo. No apliques cambios en producción
+durante una ventana de predicción abierta.
+
+La comprobación local sin servicios externos es `python -m pytest -q`.
+En desarrollo, verifica además login, refresco, rechazo de cookie manipulada,
+bloqueo al quinto fallo, cambio de PIN y ausencia de credenciales en el panel.
 
 ### 4. Cargar el primer fixture
 

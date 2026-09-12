@@ -4,7 +4,7 @@ from types import ModuleType
 import pytest
 
 import db
-from services.auth import hash_pin, read_session, sign_session, verify_pin
+from services.auth import hash_pin, read_session, sign_session, validar_pin, verify_pin
 
 
 def test_client_rejects_missing_service_key(monkeypatch):
@@ -41,3 +41,15 @@ def test_session_rejects_tampering_and_expiry():
     assert read_session(token, "test-secret", 1_999) == (7, 3)
     assert read_session(token + "x", "test-secret", 1_999) is None
     assert read_session(token, "test-secret", 2_000) is None
+
+
+def test_session_payload_carries_player_and_session_version():
+    token = sign_session(9, 4, 9_999, "test-secret")
+    assert read_session(token, "test-secret", 100) == (9, 4)
+
+
+def test_player_pin_requires_exactly_four_ascii_digits():
+    assert validar_pin("0042")
+    assert not validar_pin("123")
+    assert not validar_pin("12345")
+    assert not validar_pin("12a4")
