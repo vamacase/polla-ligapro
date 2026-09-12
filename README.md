@@ -50,14 +50,13 @@ nunca se mezclan** porque cada ambiente tiene su propio proyecto Supabase.
 
 ## Puntaje
 
-- **1 punto**: aciertas el resultado — marcador exacto (ej. predices 2-1,
-  resultado real 2-1) o solo 1X2 (acertar ganador/empate sin el marcador
-  exacto) valen lo mismo.
+- **2 puntos**: aciertas el marcador exacto (ej. predices 2-1 y el resultado
+  real es 2-1).
+- **1 punto**: aciertas G/E/P, pero el marcador es distinto.
 - **0 puntos**: fallas el resultado.
 
-Se sigue distinguiendo el marcador exacto del acierto de solo 1X2 (columna
-`es_exacto` en `v_puntos`) para el desempate del ranking y para que la app
-marque cuál fue cuál — pero ya no dan puntaje distinto.
+La columna `es_exacto` en `v_puntos` distingue el marcador exacto del acierto
+de solo 1X2, tanto para el desempate del ranking como para mostrarlo en la app.
 
 ## Setup inicial
 

@@ -13,6 +13,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
 from email_notif import enviar_confirmacion, enviar_todos_predijeron  # noqa: E402
+from core.scoring import score_display  # noqa: E402
 from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
@@ -199,17 +200,8 @@ def badge_cuenta_regresiva(kickoff, ahora=None) -> str:
 
 
 def pill_puntos(puntos, es_exacto=None) -> str:
-    """Marcador exacto y acierto de solo 1X2 valen lo mismo (1pt), pero se
-    distinguen visualmente — es_exacto viene de la vista v_puntos."""
-    if puntos is None:
-        return '<span class="polla-pill polla-pill--na">Pendiente</span>'
-    if puntos == 1 and es_exacto:
-        return '<span class="polla-pill polla-pill--exacto">Exacto</span>'
-    if puntos == 1:
-        return '<span class="polla-pill polla-pill--1x2">1X2</span>'
-    if puntos == 0:
-        return '<span class="polla-pill polla-pill--fallo">Fallo</span>'
-    return '<span class="polla-pill polla-pill--na">—</span>'
+    display = score_display(puntos, es_exacto)
+    return f'<span class="polla-pill {display.css_class}">{display.label}</span>'
 
 
 def selector_fecha(rondas, key, label="Selecciona la fecha", ronda_defecto=None):
@@ -443,7 +435,7 @@ def vista_predicciones():
         return
 
     mis_pred = cargar_predicciones(jugador_id)
-    st.caption("Predice el marcador. 1 pt si aciertas el resultado (exacto o solo 1X2), 0 si fallas.")
+    st.caption("2 pts por marcador exacto; 1 pt por acertar G/E/P con marcador distinto; 0 si fallas.")
 
     rondas = sorted({p["fecha_ronda"] for p in partidos}, key=lambda r: (r is None, r))
     ronda_sel = selector_fecha(rondas, key="ronda_pred")

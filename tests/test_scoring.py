@@ -5,6 +5,12 @@ def test_exact_score_is_two_points_and_uses_exact_label():
     assert score_display(2, True).label == "Exacto · +2"
 
 
+def test_exact_display_uses_exact_css_class():
+    display = score_display(2, True)
+    assert display.css_class == "polla-pill--exacto"
+    assert "+2" in display.label
+
+
 def test_1x2_score_has_its_own_label():
     assert score_display(1, False).label == "1X2 · +1"
 
