@@ -44,12 +44,11 @@ print(f"[ambiente: {'PRODUCCIÓN' if ES_PROD else 'desarrollo'} — {ARCHIVO_ENV
 from sofascore import SofaScore, TOURN, SEASONS  # noqa: E402
 from db import get_client  # noqa: E402
 from services.predictions import refresh_round_deadlines  # noqa: E402
-from email_notif import (  # noqa: E402
-    enviar_fecha_terminada, enviar_recordatorio_60min,
-    enviar_recordatorio_faltantes as enviar_recordatorio_faltantes_email,
-    send_html,
-)
+from email_notif import send_html  # noqa: E402
 from services.notification_worker import process_notifications  # noqa: E402
+from services.notification_payloads import (  # noqa: E402
+    enqueue_missing_predictions_reminder, enqueue_reminder_60min, enqueue_round_finished,
+)
 
 
 def numero_polla(ronda: int) -> int:
@@ -308,8 +307,8 @@ def enviar_recordatorio_faltantes():
         jugadores = db.table("jugadores").select("id, nombre, email").execute().data
         faltantes = [j for j in jugadores if j["id"] not in jugadores_con_prediccion and j["email"]]
         for j in faltantes:
-            enviar_recordatorio_faltantes_email(j["email"], j["nombre"], ronda, lista_partidos, len(ids_ronda))
-        print(f"  [ok] recordatorio de faltantes enviado — Fecha {ronda} ({len(faltantes)} jugadores)")
+            enqueue_missing_predictions_reminder(db, j["email"], j["id"], j["nombre"], ronda, lista_partidos, len(ids_ronda))
+        print(f"  [ok] recordatorio de faltantes encolado — Fecha {ronda} ({len(faltantes)} jugadores)")
 
 
 def enviar_recordatorios_60min():
@@ -372,9 +371,9 @@ def enviar_recordatorios_60min():
         for j in jugadores:
             if not j["email"]:
                 continue
-            enviar_recordatorio_60min(j["email"], j["nombre"], ronda, lista_partidos,
-                                       top3, j["nombre"] in nombres_top3)
-        print(f"  [ok] recordatorio 60min enviado — Fecha {ronda} "
+            enqueue_reminder_60min(db, j["email"], j["id"], j["nombre"], ronda, lista_partidos,
+                                    top3, j["nombre"] in nombres_top3)
+        print(f"  [ok] recordatorio 60min encolado — Fecha {ronda} "
               f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
         import subprocess
@@ -607,8 +606,8 @@ def notificar_fechas_terminadas():
                     "puntos": vp["puntos"] if vp else None,
                     "es_exacto": vp["es_exacto"] if vp else False,
                 })
-            enviar_fecha_terminada(j["email"], j["nombre"], ronda, resultados, ranking)
-        print(f"  [ok] correo de fecha terminada enviado — Fecha {ronda} "
+            enqueue_round_finished(db, j["email"], j["id"], j["nombre"], ronda, resultados, ranking)
+        print(f"  [ok] correo de fecha terminada encolado — Fecha {ronda} "
               f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
         # Al cerrar una fecha, cargar automáticamente la siguiente si aún no

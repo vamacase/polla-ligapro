@@ -3,7 +3,10 @@
 from hashlib import sha256
 import json
 
-from email_notif import render_confirmacion, render_todos_predijeron
+from email_notif import (
+    render_confirmacion, render_fecha_terminada, render_recordatorio_60min,
+    render_recordatorio_faltantes, render_todos_predijeron,
+)
 from repositories.notifications import enqueue_notification
 
 
@@ -45,3 +48,26 @@ def enqueue_all_predicted(
     payload = {"recipient": recipient, "subject": subject, "html": html, "matches": matches}
     key = f"todos_predijeron:{round_number}:{player_id}"
     return enqueue(db, key, "todos_predijeron", round_number, player_id, payload)
+
+
+def _enqueue_player_event(db, kind, recipient, player_id, round_number, subject, html, data, enqueue):
+    payload = {"recipient": recipient, "subject": subject, "html": html, **data}
+    return enqueue(db, f"{kind}:{round_number}:{player_id}", kind, round_number, player_id, payload)
+
+
+def enqueue_reminder_60min(db, recipient, player_id, player_name, round_number, matches, top3, in_top3, *, enqueue=enqueue_notification):
+    subject, html = render_recordatorio_60min(player_name, round_number, matches, top3, in_top3)
+    return _enqueue_player_event(db, "recordatorio_60min", recipient, player_id, round_number, subject, html,
+                                 {"matches": matches}, enqueue)
+
+
+def enqueue_missing_predictions_reminder(db, recipient, player_id, player_name, round_number, matches, total_matches, *, enqueue=enqueue_notification):
+    subject, html = render_recordatorio_faltantes(player_name, round_number, matches, total_matches)
+    return _enqueue_player_event(db, "recordatorio_faltantes", recipient, player_id, round_number, subject, html,
+                                 {"matches": matches}, enqueue)
+
+
+def enqueue_round_finished(db, recipient, player_id, player_name, round_number, results, ranking, *, enqueue=enqueue_notification):
+    subject, html = render_fecha_terminada(player_name, round_number, results, ranking)
+    return _enqueue_player_event(db, "fecha_terminada", recipient, player_id, round_number, subject, html,
+                                 {"results": results, "ranking": ranking}, enqueue)

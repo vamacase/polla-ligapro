@@ -262,8 +262,7 @@ def _fila_resultado_con_prediccion(r: dict) -> str:
     <tr><td colspan="3" style="border-top:1px solid {_BORDER};"></td></tr>"""
 
 
-def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
-                            resultados: list[dict], ranking: list[dict]) -> bool:
+def render_fecha_terminada(jugador_nombre: str, ronda, resultados: list[dict], ranking: list[dict]) -> tuple[str, str]:
     """resultados: [{"local", "visita", "gl", "gv", "fecha", "gl_pred", "gv_pred",
     "puntos", "es_exacto"}, ...] — la predicción es la de jugador_email.
     ranking: [{"nombre": str, "puntos": int}, ...] ya ordenado por puntos desc.
@@ -310,11 +309,16 @@ def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
         f"Hola {jugador_nombre}, estos fueron los resultados, tus aciertos y así quedó la tabla:",
         cuerpo, "Ver tabla completa",
         "entra a la app para ver el detalle completo.")
-    return _enviar_html([jugador_email], f"Polla Liga Pro — resultados y tabla (Fecha {ronda})", html)
+    return f"Polla Liga Pro — resultados y tabla (Fecha {ronda})", html
 
 
-def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
-                               partidos: list[dict], top3: list[str], en_top3: bool) -> bool:
+def enviar_fecha_terminada(jugador_email: str, jugador_nombre: str, ronda,
+                            resultados: list[dict], ranking: list[dict]) -> bool:
+    subject, html = render_fecha_terminada(jugador_nombre, ronda, resultados, ranking)
+    return _enviar_html([jugador_email], subject, html)
+
+
+def render_recordatorio_60min(jugador_nombre: str, ronda, partidos: list[dict], top3: list[str], en_top3: bool) -> tuple[str, str]:
     """partidos: [{"local", "visita", "hora"}, ...] ya ordenados por kickoff
     (el primero de la lista es el que arranca primero).
     top3: nombres de los 3 primeros lugares actuales, en orden.
@@ -381,11 +385,16 @@ def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
         f"Haz tu pronóstico lo antes posible para no perder puntos.",
         cuerpo, "Hacer mi pronóstico",
         "una vez que arranca el primer partido ya no podrás editar.")
-    return _enviar_html([jugador_email], f"Polla Liga Pro — ¡faltan 60 min! (Fecha {ronda})", html)
+    return f"Polla Liga Pro — ¡faltan 60 min! (Fecha {ronda})", html
 
 
-def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda,
-                                   partidos_pendientes: list[dict], total_fecha: int) -> bool:
+def enviar_recordatorio_60min(jugador_email: str, jugador_nombre: str, ronda,
+                               partidos: list[dict], top3: list[str], en_top3: bool) -> bool:
+    subject, html = render_recordatorio_60min(jugador_nombre, ronda, partidos, top3, en_top3)
+    return _enviar_html([jugador_email], subject, html)
+
+
+def render_recordatorio_faltantes(jugador_nombre: str, ronda, partidos_pendientes: list[dict], total_fecha: int) -> tuple[str, str]:
     """Solo para jugadores con 0 predicciones en la fecha, enviado justo
     cuando el 1° partido ya cerró (aviso temprano — el plazo real de cierre
     de la fecha es el kickoff del 2° partido). partidos_pendientes:
@@ -418,4 +427,10 @@ def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda
         f"Hola {jugador_nombre}, no queremos que pierdas más puntos.",
         cuerpo, "Predecir ahora",
         "cada partido se cierra al iniciar — entra antes de que se te pasen más.")
-    return _enviar_html([jugador_email], f"Polla Liga Pro — aún no has predicho (Fecha {ronda})", html)
+    return f"Polla Liga Pro — aún no has predicho (Fecha {ronda})", html
+
+
+def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda,
+                                   partidos_pendientes: list[dict], total_fecha: int) -> bool:
+    subject, html = render_recordatorio_faltantes(jugador_nombre, ronda, partidos_pendientes, total_fecha)
+    return _enviar_html([jugador_email], subject, html)
