@@ -80,6 +80,11 @@ def _enviar_html(destinatarios: list[str], asunto: str, html: str) -> bool:
         return False
 
 
+def send_html(recipient: str, subject: str, html: str) -> bool:
+    """Send one recipient's message and report SMTP acceptance only."""
+    return _enviar_html([recipient], subject, html)
+
+
 def _envolver(icono: str, titulo: str, intro: str, cuerpo: str, boton_texto: str, pie: str) -> str:
     """Layout compartido: icono redondo, tarjeta crema, contenido, botón, pie."""
     return f"""<!doctype html>
