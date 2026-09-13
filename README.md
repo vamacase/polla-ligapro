@@ -40,7 +40,13 @@ cerrar resultados reales, dar de alta un jugador real) hay que agregar
 python sync_polla.py fixture --prod        # actualiza la POLLA REAL
 python sync_polla.py resultados --prod
 python admin_jugadores.py agregar "Nombre Apellido" --prod
+python sync_polla.py notificaciones --prod  # procesa correos pendientes y reintentos
 ```
+
+La cola de notificaciones se procesa desde `sync/sync_notificaciones_task.bat`.
+La tarea programada local la ejecuta cada 15 minutos; si SMTP falla, los
+mensajes quedan pendientes con reintentos escalonados en lugar de bloquear a
+los jugadores.
 
 Sin `--prod`, estos mismos comandos operan sobre la base de desarrollo — sirve
 para probar el flujo completo (fixture ficticio, predicciones, resultados)
