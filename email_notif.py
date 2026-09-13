@@ -123,7 +123,7 @@ def _marcador(gl, gv) -> str:
             f'font-variant-numeric:tabular-nums;">{gl}&nbsp;–&nbsp;{gv}</span>')
 
 
-def enviar_confirmacion(destinatario: str, nombre_jugador: str, ronda, filas: list[dict]) -> bool:
+def render_confirmacion(nombre_jugador: str, ronda, filas: list[dict]) -> tuple[str, str]:
     """filas: [{"local": str, "visita": str, "gl": int, "gv": int}, ...]
 
     Se manda cada vez que el jugador guarda (incluye reguardados/ediciones
@@ -153,7 +153,12 @@ def enviar_confirmacion(destinatario: str, nombre_jugador: str, ronda, filas: li
         f"Hola {nombre_jugador}, guardamos lo siguiente. Puedes seguir editando cada partido hasta que empiece.",
         cuerpo, "Ver en la app",
         "si tú no hiciste este cambio, entra a la app y revisa tu PIN.")
-    return _enviar_html([destinatario], f"Polla Liga Pro — predicciones guardadas (Fecha {ronda})", html)
+    return f"Polla Liga Pro — predicciones guardadas (Fecha {ronda})", html
+
+
+def enviar_confirmacion(destinatario: str, nombre_jugador: str, ronda, filas: list[dict]) -> bool:
+    subject, html = render_confirmacion(nombre_jugador, ronda, filas)
+    return _enviar_html([destinatario], subject, html)
 
 
 def enviar_todos_predijeron(destinatarios: list[str], ronda, partidos: list[dict]) -> bool:
