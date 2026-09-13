@@ -14,6 +14,7 @@ Uso:
                                                       # quien tiene 0 predicciones en la fecha
                                                       # (uso: disparo puntual programado AL primer_kickoff)
     python sync_polla.py logos [--prod]              # cachea escudos (equipos nuevos que aún no tengan logo)
+    python sync_polla.py notificaciones [--prod]     # procesa correos pendientes y sus reintentos
 
 Por defecto usa .env (base de DESARROLLO). Agregar --prod para operar sobre la
 polla REAL (usa .env.prod) — solo cuando el cambio ya esté probado en dev.
@@ -46,7 +47,9 @@ from services.predictions import refresh_round_deadlines  # noqa: E402
 from email_notif import (  # noqa: E402
     enviar_fecha_terminada, enviar_recordatorio_60min,
     enviar_recordatorio_faltantes as enviar_recordatorio_faltantes_email,
+    send_html,
 )
+from services.notification_worker import process_notifications  # noqa: E402
 
 
 def numero_polla(ronda: int) -> int:
@@ -710,6 +713,12 @@ def cerrar_por_kickoff():
           f"3°+ al kickoff del 2°).")
 
 
+def procesar_notificaciones():
+    """Envía trabajos pendientes de la cola sin bloquear a la aplicación web."""
+    resumen = process_notifications(get_client(), send_html)
+    print("Notificaciones: " + ", ".join(f"{clave}={valor}" for clave, valor in resumen.items()))
+
+
 if __name__ == "__main__":
     modo = sys.argv[1] if len(sys.argv) > 1 else None
     if modo == "fixture":
@@ -746,5 +755,7 @@ if __name__ == "__main__":
         cerrar_por_kickoff()
     elif modo == "logos":
         sync_logos()
+    elif modo == "notificaciones":
+        procesar_notificaciones()
     else:
         print(__doc__)

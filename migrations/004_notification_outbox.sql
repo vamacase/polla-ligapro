@@ -29,6 +29,9 @@ create table if not exists ejecuciones_proceso (
     detalle text
 );
 
+alter table notificaciones enable row level security;
+alter table ejecuciones_proceso enable row level security;
+
 create or replace function reclamar_notificaciones(p_limit integer default 25)
 returns setof notificaciones
 language sql
