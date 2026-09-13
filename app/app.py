@@ -13,13 +13,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
-from email_notif import enviar_todos_predijeron  # noqa: E402
 from core.scoring import add_score_to_ranking, score_display  # noqa: E402
 from services.auth import (  # noqa: E402
     autenticar_jugador, cambiar_pin, jugador_de_sesion, sign_session, validar_pin,
 )
 from services.predictions import save_prediction  # noqa: E402
-from services.notification_payloads import enqueue_confirmation  # noqa: E402
+from services.notification_payloads import enqueue_all_predicted, enqueue_confirmation  # noqa: E402
 from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
@@ -318,9 +317,10 @@ def intentar_notificar_todos_predijeron(ronda):
             g.sort(key=lambda x: x["nombre"])
         cuerpo.append({"local": p["local"], "visita": p["visita"], "grupos": grupos})
 
-    destinatarios = [j["email"] for j in db().table("jugadores").select("email").execute().data if j["email"]]
-    if destinatarios:
-        enviar_todos_predijeron(destinatarios, ronda, cuerpo)
+    jugadores = db().table("jugadores").select("id, email").execute().data
+    for jugador in jugadores:
+        if jugador["email"]:
+            enqueue_all_predicted(db(), jugador["email"], jugador["id"], ronda, cuerpo)
 
 
 def get_secret(name):

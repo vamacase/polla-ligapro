@@ -1,4 +1,4 @@
-from services.notification_payloads import enqueue_confirmation
+from services.notification_payloads import enqueue_all_predicted, enqueue_confirmation
 
 
 def test_confirmation_is_enqueued_with_a_stable_key():
@@ -21,3 +21,21 @@ def test_confirmation_is_enqueued_with_a_stable_key():
     assert captured["key"].startswith("confirmacion:30:ana@example.test:")
     assert captured["kind"] == "confirmacion"
     assert captured["payload"]["rows"][0]["gl"] == 2
+
+
+def test_round_reveal_is_enqueued_once_per_player():
+    captured = {}
+
+    def fake_enqueue(db, key, kind, round_number, player_id, payload):
+        captured.update(key=key, kind=kind, round_number=round_number, player_id=player_id, payload=payload)
+        return True
+
+    enqueue_all_predicted(
+        object(), "ana@example.test", 8, 30,
+        [{"local": "Manta", "visita": "Aucas", "grupos": {"local": [], "empate": [], "visita": []}}],
+        enqueue=fake_enqueue,
+    )
+
+    assert captured["key"] == "todos_predijeron:30:8"
+    assert captured["kind"] == "todos_predijeron"
+    assert captured["payload"]["matches"][0]["local"] == "Manta"

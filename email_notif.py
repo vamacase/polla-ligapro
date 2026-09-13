@@ -161,7 +161,7 @@ def enviar_confirmacion(destinatario: str, nombre_jugador: str, ronda, filas: li
     return _enviar_html([destinatario], subject, html)
 
 
-def enviar_todos_predijeron(destinatarios: list[str], ronda, partidos: list[dict]) -> bool:
+def render_todos_predijeron(ronda, partidos: list[dict]) -> tuple[str, str]:
     """partidos: [{"local": str, "visita": str,
                     "grupos": {"local": [{"nombre","gl","gv"}, ...], "empate": [...], "visita": [...]}}, ...]
 
@@ -222,7 +222,12 @@ def enviar_todos_predijeron(destinatarios: list[str], ronda, partidos: list[dict
         "Así va a jugar cada quien esta fecha:",
         cuerpo, "Ver todos los partidos",
         "entra a la app para ver el detalle de marcadores exactos.")
-    return _enviar_html(destinatarios, f"Polla Liga Pro — predicciones de todos (Fecha {ronda})", html)
+    return f"Polla Liga Pro — predicciones de todos (Fecha {ronda})", html
+
+
+def enviar_todos_predijeron(destinatarios: list[str], ronda, partidos: list[dict]) -> bool:
+    subject, html = render_todos_predijeron(ronda, partidos)
+    return _enviar_html(destinatarios, subject, html)
 
 
 def _fila_resultado_con_prediccion(r: dict) -> str:

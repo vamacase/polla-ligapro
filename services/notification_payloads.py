@@ -3,7 +3,7 @@
 from hashlib import sha256
 import json
 
-from email_notif import render_confirmacion
+from email_notif import render_confirmacion, render_todos_predijeron
 from repositories.notifications import enqueue_notification
 
 
@@ -29,3 +29,19 @@ def enqueue_confirmation(
     }
     key = f"confirmacion:{round_number}:{recipient}:{fingerprint}"
     return enqueue(db, key, "confirmacion", round_number, player_id, payload)
+
+
+def enqueue_all_predicted(
+    db,
+    recipient: str,
+    player_id: int,
+    round_number: int,
+    matches: list[dict],
+    *,
+    enqueue=enqueue_notification,
+) -> bool:
+    """Queue the round reveal for one player using an idempotent player key."""
+    subject, html = render_todos_predijeron(round_number, matches)
+    payload = {"recipient": recipient, "subject": subject, "html": html, "matches": matches}
+    key = f"todos_predijeron:{round_number}:{player_id}"
+    return enqueue(db, key, "todos_predijeron", round_number, player_id, payload)
