@@ -30,5 +30,19 @@ def migrate_pin_hashes(client=None) -> int:
 
 
 if __name__ == "__main__":
+    import argparse
+    from dotenv import load_dotenv
+
+    parser = argparse.ArgumentParser(
+        description="Migra los PIN existentes a hashes scrypt."
+    )
+    parser.add_argument(
+        "--prod",
+        action="store_true",
+        help="Usa las credenciales de .env.prod en lugar de .env.",
+    )
+    args = parser.parse_args()
+    if args.prod:
+        load_dotenv(PROJECT_ROOT / ".env.prod", override=True)
     migrated = migrate_pin_hashes()
     print(f"Hashes de PIN migrados: {migrated}")
