@@ -737,7 +737,8 @@ def notificar_fechas_bloqueadas():
             continue
         try:
             db.table("notificaciones_enviadas").insert({"fecha_ronda": ronda, "tipo": "todos_predijeron"}).execute()
-        except Exception:
+        except Exception as error:
+            print(f"  [!] revelación Fecha {ronda}: no se pudo crear el candado ({error})")
             continue
         ids = [p["id"] for p in orden]
         preds = db.table("predicciones").select("jugador_id,partido_id,gl_pred,gv_pred").in_("partido_id", ids).execute().data or []
