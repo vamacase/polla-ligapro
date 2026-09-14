@@ -47,7 +47,8 @@ from services.predictions import refresh_round_deadlines  # noqa: E402
 from email_notif import send_html  # noqa: E402
 from services.notification_worker import process_notifications  # noqa: E402
 from services.notification_payloads import (  # noqa: E402
-    enqueue_missing_predictions_reminder, enqueue_reminder_60min, enqueue_round_finished,
+    enqueue_all_predicted, enqueue_missing_predictions_reminder, enqueue_reminder_60min,
+    enqueue_round_finished,
 )
 
 
@@ -712,6 +713,48 @@ def cerrar_por_kickoff():
           f"3°+ al kickoff del 2°).")
 
 
+def notificar_fechas_bloqueadas():
+    """Encola la revelación al iniciar el segundo partido de cada fecha.
+
+    No exige que todos hayan predicho: el cierre del segundo kickoff es el
+    evento que congela la fecha y revela las predicciones disponibles.
+    """
+    from datetime import datetime, timezone
+    db = get_client()
+    ahora = datetime.now(timezone.utc)
+    partidos = db.table("partidos").select("id,fecha_ronda,kickoff,local,visita").execute().data or []
+    jugadores = db.table("jugadores").select("id,nombre,email").execute().data or []
+    por_ronda = {}
+    for p in partidos:
+        if p["fecha_ronda"] is not None:
+            por_ronda.setdefault(p["fecha_ronda"], []).append(p)
+    ya = {n["fecha_ronda"] for n in db.table("notificaciones_enviadas").select("fecha_ronda")
+          .eq("tipo", "todos_predijeron").execute().data}
+    nombres = {j["id"]: j["nombre"] for j in jugadores}
+    for ronda, grupo in por_ronda.items():
+        orden = sorted(grupo, key=lambda p: p["kickoff"])
+        if len(orden) < 2 or datetime.fromisoformat(orden[1]["kickoff"].replace("Z", "+00:00")) > ahora or ronda in ya:
+            continue
+        try:
+            db.table("notificaciones_enviadas").insert({"fecha_ronda": ronda, "tipo": "todos_predijeron"}).execute()
+        except Exception:
+            continue
+        ids = [p["id"] for p in orden]
+        preds = db.table("predicciones").select("jugador_id,partido_id,gl_pred,gv_pred").in_("partido_id", ids).execute().data or []
+        por_partido = {pid: {"local": [], "empate": [], "visita": []} for pid in ids}
+        for pr in preds:
+            clave = "empate" if pr["gl_pred"] == pr["gv_pred"] else ("local" if pr["gl_pred"] > pr["gv_pred"] else "visita")
+            por_partido[pr["partido_id"]][clave].append({"nombre": nombres.get(pr["jugador_id"], "Jugador"), "gl": pr["gl_pred"], "gv": pr["gv_pred"], "es_exacto": False})
+        matches = [{"local": p["local"], "visita": p["visita"], "grupos": por_partido[p["id"]]} for p in orden]
+        for m in matches:
+            for lista in m["grupos"].values():
+                lista.sort(key=lambda x: x["nombre"])
+        for j in jugadores:
+            if j.get("email"):
+                enqueue_all_predicted(db, j["email"], j["id"], ronda, matches)
+        print(f"  [ok] revelación encolada — Fecha {ronda}")
+
+
 def procesar_notificaciones():
     """Envía trabajos pendientes de la cola sin bloquear a la aplicación web."""
     resumen = process_notifications(get_client(), send_html)
@@ -729,6 +772,7 @@ if __name__ == "__main__":
     elif modo == "resultados":
         sync_resultados()
         cerrar_por_kickoff()
+        notificar_fechas_bloqueadas()
         notificar_fechas_terminadas()
         limpiar_disparos_completados()
     elif modo == "resultados-si-en-ventana":
@@ -739,6 +783,7 @@ if __name__ == "__main__":
         if hay_partido_en_ventana():
             sync_resultados()
             cerrar_por_kickoff()
+            notificar_fechas_bloqueadas()
             notificar_fechas_terminadas()
         else:
             print("Sin partidos en ventana activa — se omite esta corrida.")
