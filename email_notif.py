@@ -434,3 +434,64 @@ def enviar_recordatorio_faltantes(jugador_email: str, jugador_nombre: str, ronda
                                    partidos_pendientes: list[dict], total_fecha: int) -> bool:
     subject, html = render_recordatorio_faltantes(jugador_nombre, ronda, partidos_pendientes, total_fecha)
     return _enviar_html([jugador_email], subject, html)
+
+
+def render_ganadores_polla(numero_polla: int, ini: int, fin: int, top5: list[dict]) -> tuple[str, str]:
+    """top5: [{"nombre", "puntos", "exactos"}, ...] ya ordenado por puntos desc
+    (y aciertos exactos desc como desempate) — puede traer empate real en
+    puntos, en cuyo caso se declaran varios ganadores del mismo puesto."""
+    medallas = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+    # Puesto compartido cuando hay empate exacto en puntos con el de arriba
+    # (el desempate por aciertos exactos ya viene resuelto en el orden de
+    # top5, así que solo empatan puesto quienes tengan los MISMOS puntos).
+    puestos = []
+    for i, fila in enumerate(top5):
+        if i > 0 and fila["puntos"] == top5[i - 1]["puntos"]:
+            puestos.append(puestos[-1])
+        else:
+            puestos.append(i + 1)
+
+    ganadores_top = [f for p, f in zip(puestos, top5) if p == 1]
+    if len(ganadores_top) > 1:
+        nombres_ganadores = " y ".join([", ".join(g["nombre"] for g in ganadores_top[:-1]), ganadores_top[-1]["nombre"]]) \
+            if len(ganadores_top) > 2 else f"{ganadores_top[0]['nombre']} y {ganadores_top[1]['nombre']}"
+        titulo = "🏆 ¡Tenemos ganadores!"
+        intro = (f"La Polla {numero_polla} (Fechas {ini}-{fin}) terminó en empate en el primer lugar. "
+                 f"Felicidades a <b>{nombres_ganadores}</b>, campeones de esta ronda con {ganadores_top[0]['puntos']} puntos.")
+    else:
+        titulo = "🏆 ¡Tenemos ganador!"
+        intro = (f"La Polla {numero_polla} (Fechas {ini}-{fin}) terminó. Felicidades a "
+                 f"<b>{ganadores_top[0]['nombre']}</b>, campeón de esta ronda con {ganadores_top[0]['puntos']} puntos.")
+
+    filas_html = "".join(f"""<tr style="{'background:' + _ACCENT_SOFT + ';' if puesto == 1 else ''}">
+      <td style="padding:12px 8px 12px 16px; font-size:{'14px' if puesto == 1 else '13px'}; color:{_TEXT if puesto == 1 else _FAINT}; white-space:nowrap;">{medallas.get(puesto, f'#{puesto}')}</td>
+      <td style="padding:12px 4px;">
+        <div style="font-size:14px; font-weight:{'800' if puesto == 1 else '600'}; color:{_TEXT};">{fila['nombre']}</div>
+        <div style="font-size:11.5px; color:{_FAINT};">{fila['exactos']} aciertos exactos</div>
+      </td>
+      <td style="padding:12px 16px; text-align:right; font-size:{'15px' if puesto == 1 else '14px'}; font-weight:800; color:{_ACCENT if puesto == 1 else _TEXT}; white-space:nowrap;">{fila['puntos']} pts</td>
+    </tr>
+    <tr><td colspan="3" style="border-top:1px solid {_BORDER};"></td></tr>"""
+        for puesto, fila in zip(puestos, top5))
+
+    cuerpo = f"""
+    <tr><td style="padding-bottom:8px;">
+      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Top 5 — Polla {numero_polla}</span>
+    </td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden;">
+        {filas_html}
+      </table>
+    </td></tr>
+    """
+    html = _envolver(
+        "🏆", titulo, intro, cuerpo, "Ver tabla completa",
+        f"la nueva ronda arranca desde cero en Fecha {fin + 1}.")
+    return f"Polla Liga Pro — ganador{'es' if len(ganadores_top) > 1 else ''} Polla {numero_polla} (Fechas {ini}-{fin})", html
+
+
+def enviar_ganadores_polla(destinatarios: list[str], numero_polla: int, ini: int, fin: int,
+                            top5: list[dict]) -> bool:
+    subject, html = render_ganadores_polla(numero_polla, ini, fin, top5)
+    return _enviar_html(destinatarios, subject, html)

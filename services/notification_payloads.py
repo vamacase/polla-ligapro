@@ -4,7 +4,7 @@ from hashlib import sha256
 import json
 
 from email_notif import (
-    render_confirmacion, render_fecha_terminada, render_recordatorio_60min,
+    render_confirmacion, render_fecha_terminada, render_ganadores_polla, render_recordatorio_60min,
     render_recordatorio_faltantes, render_todos_predijeron,
 )
 from repositories.notifications import enqueue_notification
@@ -71,3 +71,13 @@ def enqueue_round_finished(db, recipient, player_id, player_name, round_number, 
     subject, html = render_fecha_terminada(player_name, round_number, results, ranking)
     return _enqueue_player_event(db, "fecha_terminada", recipient, player_id, round_number, subject, html,
                                  {"results": results, "ranking": ranking}, enqueue)
+
+
+def enqueue_polla_finished(db, recipient, player_id, last_round_number, polla_number, start_round, end_round, top5, *, enqueue=enqueue_notification):
+    """Un solo correo por jugador anunciando al/los ganador(es) de la polla
+    (bloque de 5 fechas) que se acaba de completar. Se clava a last_round_number
+    (el fin del rango) para reusar el mismo candado de idempotencia que el
+    resto de eventos por fecha."""
+    subject, html = render_ganadores_polla(polla_number, start_round, end_round, top5)
+    return _enqueue_player_event(db, "polla_terminada", recipient, player_id, last_round_number, subject, html,
+                                 {"polla_number": polla_number, "top5": top5}, enqueue)
