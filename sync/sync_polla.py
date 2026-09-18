@@ -48,7 +48,7 @@ from email_notif import send_html  # noqa: E402
 from services.notification_worker import process_notifications  # noqa: E402
 from services.notification_payloads import (  # noqa: E402
     enqueue_all_predicted, enqueue_missing_predictions_reminder, enqueue_polla_finished,
-    enqueue_reminder_60min, enqueue_round_finished,
+    enqueue_polla_tied, enqueue_reminder_60min, enqueue_round_finished,
 )
 
 
@@ -646,8 +646,8 @@ def notificar_fechas_terminadas():
               f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
         # Si esta fecha es la última de su polla (bloque de 5), encolar
-        # además el correo de ganador(es) de la polla completa — un solo
-        # correo extra por jugador, aparte del de "fecha terminada" de arriba.
+        # además el correo de cierre de la polla completa — un solo correo
+        # extra por jugador, aparte del de "fecha terminada" de arriba.
         if ronda == fin:
             nombres_por_id = {j["id"]: j["nombre"] for j in jugadores}
             top5 = sorted(
@@ -655,12 +655,26 @@ def notificar_fechas_terminadas():
                  for jid, d in agregados.items()],
                 key=lambda r: (-r["puntos"], -r["exactos"]))[:5]
             if top5:
+                # Reglamento (numeral 7): un empate en puntos en el 1er
+                # puesto NO se declara ganador directo — se resuelve con 3
+                # partidos adicionales que elige el Administrador. Así que
+                # solo se declara ganador cuando el 1er puesto es único;
+                # si hay empate, se avisa el empate y se espera el desempate.
+                empatados_top1 = [f for f in top5 if f["puntos"] == top5[0]["puntos"]]
+                hay_empate = len(empatados_top1) > 1
                 for j in jugadores:
                     if not j["email"]:
                         continue
-                    enqueue_polla_finished(db, j["email"], j["id"], ronda, numero_polla(ronda), ini, fin, top5)
-                print(f"  [ok] correo de ganadores de la Polla {numero_polla(ronda)} encolado "
-                      f"({sum(1 for j in jugadores if j['email'])} jugadores)")
+                    if hay_empate:
+                        enqueue_polla_tied(db, j["email"], j["id"], ronda, numero_polla(ronda), ini, fin, empatados_top1)
+                    else:
+                        enqueue_polla_finished(db, j["email"], j["id"], ronda, numero_polla(ronda), ini, fin, top5)
+                if hay_empate:
+                    print(f"  [ok] correo de EMPATE en la Polla {numero_polla(ronda)} encolado "
+                          f"({sum(1 for j in jugadores if j['email'])} jugadores) — pendiente desempate manual")
+                else:
+                    print(f"  [ok] correo de ganadores de la Polla {numero_polla(ronda)} encolado "
+                          f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
         # Al cerrar una fecha, cargar automáticamente la siguiente si aún no
         # existe en la base — evita que quede sin subir hasta que alguien lo

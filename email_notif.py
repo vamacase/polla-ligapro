@@ -495,3 +495,49 @@ def enviar_ganadores_polla(destinatarios: list[str], numero_polla: int, ini: int
                             top5: list[dict]) -> bool:
     subject, html = render_ganadores_polla(numero_polla, ini, fin, top5)
     return _enviar_html(destinatarios, subject, html)
+
+
+def render_empate_polla(numero_polla: int, ini: int, fin: int, empatados: list[dict]) -> tuple[str, str]:
+    """Se manda EN LUGAR de render_ganadores_polla cuando el primer puesto
+    queda empatado en puntos al cerrar la polla. El Reglamento (numeral 7)
+    exige resolver esto con 3 partidos adicionales elegidos por el
+    Administrador durante la semana siguiente antes de declarar ganador —
+    este correo solo avisa el empate, no declara a nadie campeón todavía."""
+    nombres = [e["nombre"] for e in empatados]
+    lista_nombres = " y ".join([", ".join(nombres[:-1]), nombres[-1]]) if len(nombres) > 2 else " y ".join(nombres)
+
+    filas_html = "".join(f"""<tr>
+      <td style="padding:12px 8px 12px 16px; font-size:14px; color:{_TEXT}; white-space:nowrap;">🤝</td>
+      <td style="padding:12px 4px;">
+        <div style="font-size:14px; font-weight:700; color:{_TEXT};">{e['nombre']}</div>
+        <div style="font-size:11.5px; color:{_FAINT};">{e['exactos']} aciertos exactos</div>
+      </td>
+      <td style="padding:12px 16px; text-align:right; font-size:15px; font-weight:800; color:{_ACCENT}; white-space:nowrap;">{e['puntos']} pts</td>
+    </tr>
+    <tr><td colspan="3" style="border-top:1px solid {_BORDER};"></td></tr>"""
+        for e in empatados)
+
+    cuerpo = f"""
+    <tr><td style="padding-bottom:8px;">
+      <span style="font-size:12px; font-weight:700; color:{_MUTED}; text-transform:uppercase; letter-spacing:0.03em;">Empatados en el 1er puesto — Polla {numero_polla}</span>
+    </td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden;">
+        {filas_html}
+      </table>
+    </td></tr>
+    """
+    html = _envolver(
+        "🤝", "Empate en el primer puesto — pendiente desempate",
+        (f"La Polla {numero_polla} (Fechas {ini}-{fin}) terminó con <b>{lista_nombres}</b> empatados "
+         f"en el primer lugar con {empatados[0]['puntos']} puntos. Según el reglamento, el Administrador "
+         f"de turno debe elegir 3 partidos adicionales durante la semana siguiente para desempatar."),
+        cuerpo, "Ver tabla completa",
+        "el ganador se declarará una vez resuelto el desempate.")
+    return f"Polla Liga Pro — empate en Polla {numero_polla} (Fechas {ini}-{fin}), pendiente desempate", html
+
+
+def enviar_empate_polla(destinatarios: list[str], numero_polla: int, ini: int, fin: int,
+                         empatados: list[dict]) -> bool:
+    subject, html = render_empate_polla(numero_polla, ini, fin, empatados)
+    return _enviar_html(destinatarios, subject, html)

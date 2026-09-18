@@ -4,8 +4,8 @@ from hashlib import sha256
 import json
 
 from email_notif import (
-    render_confirmacion, render_fecha_terminada, render_ganadores_polla, render_recordatorio_60min,
-    render_recordatorio_faltantes, render_todos_predijeron,
+    render_confirmacion, render_empate_polla, render_fecha_terminada, render_ganadores_polla,
+    render_recordatorio_60min, render_recordatorio_faltantes, render_todos_predijeron,
 )
 from repositories.notifications import enqueue_notification
 
@@ -81,3 +81,13 @@ def enqueue_polla_finished(db, recipient, player_id, last_round_number, polla_nu
     subject, html = render_ganadores_polla(polla_number, start_round, end_round, top5)
     return _enqueue_player_event(db, "polla_terminada", recipient, player_id, last_round_number, subject, html,
                                  {"polla_number": polla_number, "top5": top5}, enqueue)
+
+
+def enqueue_polla_tied(db, recipient, player_id, last_round_number, polla_number, start_round, end_round, tied, *, enqueue=enqueue_notification):
+    """Se encola EN LUGAR de enqueue_polla_finished cuando el 1er puesto
+    queda empatado en puntos: el Reglamento (numeral 7) exige un desempate
+    de 3 partidos elegidos por el Administrador antes de declarar ganador,
+    así que este correo solo avisa el empate."""
+    subject, html = render_empate_polla(polla_number, start_round, end_round, tied)
+    return _enqueue_player_event(db, "polla_empatada", recipient, player_id, last_round_number, subject, html,
+                                 {"polla_number": polla_number, "tied": tied}, enqueue)
