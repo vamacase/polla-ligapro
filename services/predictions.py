@@ -6,7 +6,13 @@ from core.deadlines import DeadlineMatch, calculate_deadlines
 
 
 def save_prediction(client, player_id: int, match_id: int, local_goals: int, away_goals: int) -> dict:
-    """Persist one prediction through the server-clock-validated RPC."""
+    """Persist one prediction through the server-clock-validated RPC.
+
+    guardar_prediccion_segura() está declarado `returns predicciones`
+    (rowtype escalar, no `setof`) — postgrest-py entrega ese resultado
+    como un dict plano, no como lista de una fila. Indexar con [0] revienta
+    con KeyError en TODO guardado exitoso (bug real visto en producción).
+    """
     result = client.rpc(
         "guardar_prediccion_segura",
         {
@@ -18,7 +24,7 @@ def save_prediction(client, player_id: int, match_id: int, local_goals: int, awa
     ).execute()
     if not result.data:
         raise RuntimeError("La base no devolvió la predicción guardada.")
-    return result.data[0]
+    return result.data[0] if isinstance(result.data, list) else result.data
 
 
 def refresh_round_deadlines(client, round_number: int) -> int:
