@@ -137,7 +137,9 @@ def programar_disparos_puntuales():
     15 min durante toda la ventana. Delega en PowerShell (Register-
     ScheduledTask con un DateTime real) en vez de "schtasks /SD" para no
     depender del formato de fecha corta configurado en el sistema. Solo
-    funciona en Windows (esta PC) — nombres de tarea únicos por event_id, así
+    funciona en Windows (esta PC) — nombres de tarea únicos por event_id
+    Y por ambiente (dev/prod comparten el mismo Task Scheduler de esta PC:
+    sin el sufijo, probar en dev pisaba el horario real de producción), así
     que correr esto varias veces no crea duplicados (se usa -Force, que
     sobrescribe con el mismo horario si ya existía)."""
     import subprocess
@@ -148,6 +150,7 @@ def programar_disparos_puntuales():
     ahora = datetime.now(timezone.utc)
 
     bat = str(Path(__file__).resolve().parent / "sync_resultados_task.bat")
+    sufijo_ambiente = "" if ES_PROD else "_dev"
     creadas = pasadas = fallidas = 0
     for p in pendientes:
         ko = datetime.fromisoformat(p["kickoff"].replace("Z", "+00:00"))
@@ -156,7 +159,7 @@ def programar_disparos_puntuales():
             pasadas += 1
             continue
         disparo_local = disparo.astimezone()
-        nombre_tarea = f"PollaLigaPro_Resultado_{p['event_id']}"
+        nombre_tarea = f"PollaLigaPro_Resultado_{p['event_id']}{sufijo_ambiente}"
         ps = (
             f'$action = New-ScheduledTaskAction -Execute "{bat}"; '
             f'$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date "{disparo_local.isoformat()}"); '
@@ -181,7 +184,9 @@ def programar_recordatorio_60min():
     """Crea, vía Task Scheduler, un disparo puntual (ONCE) para el correo de
     "faltan 60 min" de cada fecha con partidos aún no jugados: se dispara a
     (kickoff del primer partido de esa fecha) - 60 min. Un único disparo por
-    fecha (no por partido) — nombre de tarea único por fecha_ronda, así que
+    fecha (no por partido) — nombre de tarea único por fecha_ronda Y por
+    ambiente (dev/prod comparten el mismo Task Scheduler de esta PC: sin el
+    sufijo, probar en dev pisaba el horario real de producción), así que
     correr esto varias veces no crea duplicados (usa -Force)."""
     import subprocess
     from datetime import datetime, timezone, timedelta
@@ -199,6 +204,7 @@ def programar_recordatorio_60min():
             primer_kickoff_por_ronda[p["fecha_ronda"]] = ko
 
     bat = str(Path(__file__).resolve().parent / "sync_recordatorio_task.bat")
+    sufijo_ambiente = "" if ES_PROD else "_dev"
     creadas = pasadas = fallidas = 0
     for ronda, primer_ko in primer_kickoff_por_ronda.items():
         disparo = primer_ko - timedelta(minutes=60)
@@ -206,7 +212,7 @@ def programar_recordatorio_60min():
             pasadas += 1
             continue
         disparo_local = disparo.astimezone()
-        nombre_tarea = f"PollaLigaPro_Recordatorio60_{ronda}"
+        nombre_tarea = f"PollaLigaPro_Recordatorio60_{ronda}{sufijo_ambiente}"
         ps = (
             f'$action = New-ScheduledTaskAction -Execute "{bat}"; '
             f'$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date "{disparo_local.isoformat()}"); '
@@ -234,8 +240,10 @@ def programar_recordatorio_faltantes():
     temprano para quien todavía no predijo nada. El plazo real de cierre de
     la fecha es el kickoff del 2° partido (ver cerrar_por_kickoff()), pero
     este correo dispara antes, al primero, a propósito. Un único disparo
-    por fecha — nombre de tarea único por fecha_ronda, así que correr esto
-    varias veces no crea duplicados (usa -Force)."""
+    por fecha — nombre de tarea único por fecha_ronda Y por ambiente
+    (dev/prod comparten el mismo Task Scheduler de esta PC: sin el sufijo,
+    probar en dev pisaba el horario real de producción), así que correr
+    esto varias veces no crea duplicados (usa -Force)."""
     import subprocess
     from datetime import datetime, timezone
 
@@ -260,6 +268,7 @@ def programar_recordatorio_faltantes():
             primer_kickoff_por_ronda[p["fecha_ronda"]] = ko
 
     bat = str(Path(__file__).resolve().parent / "sync_recordatorio_faltantes_task.bat")
+    sufijo_ambiente = "" if ES_PROD else "_dev"
     creadas = pasadas = fallidas = 0
     for ronda, primer_ko in primer_kickoff_por_ronda.items():
         disparo = primer_ko
@@ -267,7 +276,7 @@ def programar_recordatorio_faltantes():
             pasadas += 1
             continue
         disparo_local = disparo.astimezone()
-        nombre_tarea = f"PollaLigaPro_RecordatorioFaltantes_{ronda}"
+        nombre_tarea = f"PollaLigaPro_RecordatorioFaltantes_{ronda}{sufijo_ambiente}"
         ps = (
             f'$action = New-ScheduledTaskAction -Execute "{bat}"; '
             f'$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date "{disparo_local.isoformat()}"); '
@@ -411,10 +420,11 @@ def enviar_recordatorios_60min():
         print(f"  [ok] recordatorio 60min encolado — Fecha {ronda} "
               f"({sum(1 for j in jugadores if j['email'])} jugadores)")
 
+        sufijo_ambiente = "" if ES_PROD else "_dev"
         import subprocess
         subprocess.run(
             ["powershell", "-NoProfile", "-Command",
-             f'Unregister-ScheduledTask -TaskName "PollaLigaPro_Recordatorio60_{ronda}" '
+             f'Unregister-ScheduledTask -TaskName "PollaLigaPro_Recordatorio60_{ronda}{sufijo_ambiente}" '
              f'-Confirm:$false -ErrorAction SilentlyContinue'],
             capture_output=True, text=True)
 
@@ -425,9 +435,10 @@ def limpiar_disparos_completados():
     import subprocess
     db = get_client()
     con_resultado = db.table("partidos").select("event_id").not_.is_("gl_real", "null").execute().data
+    sufijo_ambiente = "" if ES_PROD else "_dev"
     borradas = 0
     for p in con_resultado:
-        nombre_tarea = f"PollaLigaPro_Resultado_{p['event_id']}"
+        nombre_tarea = f"PollaLigaPro_Resultado_{p['event_id']}{sufijo_ambiente}"
         res = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              f'Unregister-ScheduledTask -TaskName "{nombre_tarea}" -Confirm:$false -ErrorAction SilentlyContinue'],
