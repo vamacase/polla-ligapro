@@ -62,11 +62,25 @@ def rango_polla(numero: int) -> tuple[int, int]:
     return inicio, inicio + 4
 
 
+# La Liga Pro Ecuador 2026 juega dos vueltas bajo el MISMO season_id de
+# SofaScore (89674): al terminar la primera vuelta (rondas 1-30, "Fecha
+# 1-30" en la Polla), SofaScore reinicia su propio contador de "round" a 1
+# para la segunda vuelta. Offset fijo para que la Polla siga numerando sin
+# cortes: "round" de SofaScore 1 en adelante se traduce a fecha_ronda 31+.
+OFFSET_SEGUNDA_VUELTA = 30
+
+
 def sync_fixture(anio=2026, max_partidos=10, ronda=None):
-    """Trae próximos partidos de SofaScore y los inserta/actualiza en Supabase."""
+    """Trae próximos partidos de SofaScore y los inserta/actualiza en Supabase.
+
+    `ronda` es siempre el número de fecha de la Polla (31, 32, ...). Si cae
+    en la segunda vuelta (>30), se resta el offset para filtrar contra el
+    "round" que de verdad reporta SofaScore, y se vuelve a sumar al guardar.
+    """
     from predecir import proximos_partidos  # requiere el monorepo local (10-prediction/src)
     print("Consultando próximos partidos en SofaScore...")
-    partidos = proximos_partidos(anio=anio, max_partidos=max_partidos, con_odds=False, ronda=ronda)
+    ronda_sofascore = ronda - OFFSET_SEGUNDA_VUELTA if ronda and ronda > OFFSET_SEGUNDA_VUELTA else ronda
+    partidos = proximos_partidos(anio=anio, max_partidos=max_partidos, con_odds=False, ronda=ronda_sofascore)
     if not partidos:
         print("No se encontraron próximos partidos.")
         return
@@ -74,10 +88,14 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
     db = get_client()
     rondas_actualizadas = set()
     for p in partidos:
+        ronda_polla = p["ronda"] + OFFSET_SEGUNDA_VUELTA if ronda and ronda > OFFSET_SEGUNDA_VUELTA and p["ronda"] is not None else p["ronda"]
         fila = {
             "event_id": p["event_id"],
-            "fecha_ronda": p["ronda"],
+            "fecha_ronda": ronda_polla,
             "kickoff": p["fecha"].isoformat(),
+            # Placeholder para la columna not-null: refresh_round_deadlines()
+            # la recalcula bien (regla de toda la ronda) justo abajo.
+            "cierre_predicciones": p["fecha"].isoformat(),
             "local": p["local"],
             "visita": p["visitante"],
             "local_id": p["local_id"],
@@ -85,9 +103,9 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
             "cerrado": False,
         }
         db.table("partidos").upsert(fila, on_conflict="event_id").execute()
-        if p["ronda"] is not None:
-            rondas_actualizadas.add(p["ronda"])
-        print(f"  [ok] {p['local']} vs {p['visitante']}  (ronda {p['ronda']}, {p['fecha']})")
+        if ronda_polla is not None:
+            rondas_actualizadas.add(ronda_polla)
+        print(f"  [ok] {p['local']} vs {p['visitante']}  (fecha {ronda_polla}, {p['fecha']})")
     for ronda_actualizada in rondas_actualizadas:
         refresh_round_deadlines(db, ronda_actualizada)
     print(f"\n{len(partidos)} partidos sincronizados a Supabase.")
