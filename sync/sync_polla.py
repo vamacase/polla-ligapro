@@ -62,33 +62,49 @@ def rango_polla(numero: int) -> tuple[int, int]:
     return inicio, inicio + 4
 
 
-# La Liga Pro Ecuador 2026 juega dos vueltas bajo el MISMO season_id de
-# SofaScore (89674): al terminar la primera vuelta (rondas 1-30, "Fecha
-# 1-30" en la Polla), SofaScore reinicia su propio contador de "round" a 1
-# para la segunda vuelta. Offset fijo para que la Polla siga numerando sin
-# cortes: "round" de SofaScore 1 en adelante se traduce a fecha_ronda 31+.
-OFFSET_SEGUNDA_VUELTA = 30
+# Al terminar la fase de todos-contra-todos (fecha_ronda 1-30), la Liga Pro
+# Ecuador 2026 divide la tabla en 3 grupos (Championship/Qualifying/
+# Relegation Round), cada uno un sub-torneo de SofaScore con su PROPIO
+# roundInfo.round independiente (pueden desincronizarse entre sí). Por eso,
+# desde fecha_ronda 31 en adelante ya no filtramos por round: agrupamos los
+# próximos partidos de los 3 grupos por cercanía de kickoff (8 partidos por
+# fecha: 3 Championship + 2 Qualifying + 3 Relegation).
+INICIO_FASE_GRUPOS = 31
+PARTIDOS_POR_FECHA_FASE_GRUPOS = 8
 
 
 def sync_fixture(anio=2026, max_partidos=10, ronda=None):
     """Trae próximos partidos de SofaScore y los inserta/actualiza en Supabase.
 
-    `ronda` es siempre el número de fecha de la Polla (31, 32, ...). Si cae
-    en la segunda vuelta (>30), se resta el offset para filtrar contra el
-    "round" que de verdad reporta SofaScore, y se vuelve a sumar al guardar.
+    `ronda` es siempre el número de fecha de la Polla. Desde INICIO_FASE_GRUPOS
+    ya no existe un único "round" válido para los 3 grupos a la vez, así que
+    se ignora el roundInfo de SofaScore y se toman los próximos
+    PARTIDOS_POR_FECHA_FASE_GRUPOS eventos más cercanos en el tiempo (de
+    cualquier grupo) como la fecha pedida.
     """
     from predecir import proximos_partidos  # requiere el monorepo local (10-prediction/src)
     print("Consultando próximos partidos en SofaScore...")
-    ronda_sofascore = ronda - OFFSET_SEGUNDA_VUELTA if ronda and ronda > OFFSET_SEGUNDA_VUELTA else ronda
-    partidos = proximos_partidos(anio=anio, max_partidos=max_partidos, con_odds=False, ronda=ronda_sofascore)
+    fase_grupos = ronda is not None and ronda >= INICIO_FASE_GRUPOS
+    ronda_sofascore = None if fase_grupos else ronda
+    # En fase de grupos, proximos_partidos() corta a max_partidos ANTES de que
+    # podamos reordenar por fecha (mezcla los 3 sub-torneos según el orden en
+    # que SofaScore los pagina, no por kickoff) — se pide un margen amplio de
+    # próximas fechas y se recorta ya ordenado, abajo.
+    pedir = PARTIDOS_POR_FECHA_FASE_GRUPOS * 6 if fase_grupos else max_partidos
+    partidos = proximos_partidos(anio=anio, max_partidos=pedir, con_odds=False, ronda=ronda_sofascore)
     if not partidos:
         print("No se encontraron próximos partidos.")
         return
 
+    if fase_grupos:
+        partidos = sorted(partidos, key=lambda p: p["fecha"])[:PARTIDOS_POR_FECHA_FASE_GRUPOS]
+        for p in partidos:
+            print(f"  [grupo] {p['grupo']}: {p['local']} vs {p['visitante']} ({p['fecha']})")
+
     db = get_client()
     rondas_actualizadas = set()
     for p in partidos:
-        ronda_polla = p["ronda"] + OFFSET_SEGUNDA_VUELTA if ronda and ronda > OFFSET_SEGUNDA_VUELTA and p["ronda"] is not None else p["ronda"]
+        ronda_polla = ronda if fase_grupos else p["ronda"]
         fila = {
             "event_id": p["event_id"],
             "fecha_ronda": ronda_polla,
