@@ -128,6 +128,7 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
 
 
 MARGEN_FIN_PARTIDO_MIN = 135  # 2h de partido + 15 min de margen (ver programar_disparos_puntuales)
+VENTANA_PARTIDO_HORAS = MARGEN_FIN_PARTIDO_MIN / 60  # misma ventana, en horas (ver hay_partido_en_ventana)
 
 
 def programar_disparos_puntuales():
