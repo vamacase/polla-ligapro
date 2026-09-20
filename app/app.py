@@ -14,6 +14,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
 from core.scoring import add_score_to_ranking, score_display  # noqa: E402
+from core.results_view import render_resultado  # noqa: E402
 from services.auth import (  # noqa: E402
     autenticar_jugador, cambiar_pin, jugador_de_sesion, sign_session, validar_pin,
 )
@@ -109,6 +110,26 @@ st.html("""
 .polla-pill--fallo { background:var(--polla-fallo); }
 .polla-pill--na { background:#E3E3DA; color:var(--polla-muted); }
 
+.polla-scoreline {
+  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center; gap:0.45rem; width:100%;
+}
+.polla-score-team {
+  display:flex; align-items:center; gap:0.35rem; min-width:0;
+  color:var(--polla-text); font-size:0.88rem; font-weight:600;
+}
+.polla-score-team--local { justify-content:flex-end; text-align:right; }
+.polla-score-team--visita { justify-content:flex-start; text-align:left; }
+.polla-score-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.polla-score-team img { flex:0 0 auto; object-fit:contain; }
+.polla-score-pair {
+  display:flex; align-items:center; justify-content:center; gap:0.3rem;
+  min-width:3.8rem; padding:0.25rem 0.45rem; border-radius:0.55rem;
+  border:1px solid var(--polla-border); background:var(--polla-card);
+  color:var(--polla-text); font-size:1.05rem; font-weight:750; font-variant-numeric:tabular-nums;
+}
+.polla-score-separator { color:var(--polla-muted); font-weight:500; }
+
 .polla-rank-row {
   display:flex; align-items:center; gap:0.7rem;
   padding:0.5rem 0.8rem; border-radius:0.75rem; margin-bottom:0.4rem;
@@ -133,6 +154,9 @@ st.html("""
     div[data-testid="stNumberInput"] input { font-size: 1rem; padding: 0.5rem; }
     h3 { font-size: 1.1rem; }
     .polla-equipo { min-height: 4rem; }
+    .polla-scoreline { gap:0.25rem; }
+    .polla-score-team { gap:0.2rem; font-size:0.8rem; }
+    .polla-score-pair { min-width:3.4rem; padding:0.2rem 0.35rem; }
     /* Botones +/- del marcador: área táctil grande en móvil (112px).
        Testids verificados en Streamlit 1.60.0. */
     [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {
@@ -753,20 +777,13 @@ def vista_resultados():
         with st.container(border=True, key=f"card_resultado_{p['id']}"):
             kickoff_local = a_local(p["kickoff"]).strftime("%d/%m")
             st.caption(f"Partido {i} — {kickoff_local}")
-            c1, c2, c3 = st.columns([3, 1, 3])
-            with c1:
-                st.markdown(
-                    f'<div style="text-align:right; font-size:0.85em">{p["local"]} {logo(p.get("local_id"), 28)}</div>',
-                    unsafe_allow_html=True)
-            with c2:
-                st.markdown(
-                    f'<div style="text-align:center"><span class="polla-pill" style="background:var(--polla-card); '
-                    f'border:1px solid var(--polla-border); font-size:1.1rem">{p["gl_real"]} - {p["gv_real"]}</span></div>',
-                    unsafe_allow_html=True)
-            with c3:
-                st.markdown(
-                    f'<div style="font-size:0.85em">{logo(p.get("visita_id"), 28)} {p["visita"]}</div>',
-                    unsafe_allow_html=True)
+            st.markdown(
+                render_resultado(
+                    p["local"], logo(p.get("local_id"), 24), p["gl_real"],
+                    p["gv_real"], p["visita"], logo(p.get("visita_id"), 24),
+                ),
+                unsafe_allow_html=True,
+            )
 
 
 def vista_mis_predicciones():
