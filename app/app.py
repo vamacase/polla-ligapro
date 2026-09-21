@@ -3,6 +3,7 @@ import os
 import hmac
 import sys
 import time
+from html import escape
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -67,8 +68,8 @@ st.html("""
   border-radius: 0.75rem;
 }
 
-/* Fila compacta de pronóstico ("Opción A"): una línea corta por equipo
-   (escudo+nombre+su marcador) en vez de equipo arriba/input abajo por
+/* Fila compacta de pronóstico móvil: escudo y su marcador por equipo
+   en vez de equipo arriba/input abajo por
    separado — menos alto que la tarjeta vertical anterior. No se intenta
    poner ambos equipos lado a lado: Streamlit apila st.columns en una sola
    columna vertical bajo cierto ancho SIN importar cuántas haya (incluso
@@ -129,6 +130,10 @@ st.html("""
   color:var(--polla-text); font-size:1.05rem; font-weight:750; font-variant-numeric:tabular-nums;
 }
 .polla-score-separator { color:var(--polla-muted); font-weight:500; }
+.polla-score--ganador {
+  padding:0.08rem 0.28rem; border-radius:0.35rem;
+  background:var(--polla-exacto); color:var(--polla-text); font-weight:800;
+}
 
 .polla-rank-row {
   display:flex; align-items:center; gap:0.7rem;
@@ -150,13 +155,34 @@ st.html("""
 }
 
 @media (max-width: 640px) {
-    .block-container { padding-left: 0.8rem; padding-right: 0.8rem; }
+    .block-container { padding-left: 0.8rem; padding-right: 0.8rem; padding-bottom: 5.5rem !important; }
     div[data-testid="stNumberInput"] input { font-size: 1rem; padding: 0.5rem; }
     h3 { font-size: 1.1rem; }
     .polla-equipo { min-height: 4rem; }
     .polla-scoreline { gap:0.25rem; }
     .polla-score-team { gap:0.2rem; font-size:0.8rem; }
     .polla-score-pair { min-width:3.4rem; padding:0.2rem 0.35rem; }
+    /* Las pestañas existentes pasan a funcionar como navegación inferior;
+       solo cambia su posición en pantalla, no la selección ni el contenido. */
+    div[data-testid="stTabs"] [role="tablist"] {
+        position:fixed; left:0; right:0; bottom:0; z-index:1000;
+        display:flex; flex-wrap:nowrap; justify-content:space-around;
+        padding:0.35rem 0.2rem max(0.45rem, env(safe-area-inset-bottom));
+        background:var(--polla-card); border-top:1px solid var(--polla-border);
+        box-shadow:0 -2px 10px rgba(47, 62, 56, 0.10);
+    }
+    div[data-testid="stTabs"] [role="tablist"] button[role="tab"] {
+        display:flex; flex:1 1 0; flex-direction:column; align-items:center;
+        justify-content:center; min-width:0; min-height:2.8rem; padding:0.25rem 0.1rem;
+        border:0; font-size:0.68rem; line-height:1.15; white-space:normal;
+    }
+    div[data-testid="stTabs"] [role="tablist"] button[role="tab"] > div {
+        display:flex; flex-direction:column; align-items:center; justify-content:center;
+        gap:0.12rem; text-align:center;
+    }
+    div[data-testid="stTabs"] [role="tablist"] button[role="tab"] [data-testid="stIconMaterial"] {
+        font-size:1.15rem;
+    }
     /* Botones +/- del marcador: área táctil grande en móvil (112px).
        Testids verificados en Streamlit 1.60.0. */
     [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {
@@ -437,9 +463,12 @@ def tarjeta_partido(p, mis_pred):
     comprobado) — forzar layout horizontal vía CSS no es fiable porque
     Streamlit recalcula el flex-flow de sus bloques por JS en cada resize.
     Por eso cada equipo va en su propia línea (más compacta que la tarjeta
-    anterior: equipo+goles comparten línea en vez de equipo arriba/input
-    abajo por separado)."""
+    anterior: escudo+goles comparten línea en vez de equipo arriba/input
+    abajo por separado). Los nombres permanecen como etiquetas accesibles,
+    no como texto visible."""
     existente = mis_pred.get(p["id"])
+    local_accesible = escape(str(p["local"]), quote=True)
+    visita_accesible = escape(str(p["visita"]), quote=True)
     with st.container(border=True, key=f"card_partido_{p['id']}"):
         kickoff_local = a_local(p["kickoff"]).strftime("%a %d/%m %H:%M")
         c_info, c_badge = st.columns([2, 1])
@@ -449,16 +478,18 @@ def tarjeta_partido(p, mis_pred):
             st.markdown(badge_cuenta_regresiva(p["cierre_predicciones"]), unsafe_allow_html=True)
 
         st.markdown(
-            f'<div class="polla-fila-equipo">{logo(p.get("local_id"), 22)}<span>{p["local"]}</span></div>',
+            f'<div class="polla-fila-equipo" role="img" aria-label="Escudo de {local_accesible}">'
+            f'{logo(p.get("local_id"), 30)}</div>',
             unsafe_allow_html=True)
-        gl = st.number_input("Goles", min_value=0, max_value=15, step=1,
+        gl = st.number_input(f'Goles de {p["local"]}', min_value=0, max_value=15, step=1,
                               value=existente["gl_pred"] if existente else 0,
                               key=f"gl_{p['id']}", label_visibility="collapsed")
 
         st.markdown(
-            f'<div class="polla-fila-equipo">{logo(p.get("visita_id"), 22)}<span>{p["visita"]}</span></div>',
+            f'<div class="polla-fila-equipo" role="img" aria-label="Escudo de {visita_accesible}">'
+            f'{logo(p.get("visita_id"), 30)}</div>',
             unsafe_allow_html=True)
-        gv = st.number_input("Goles", min_value=0, max_value=15, step=1,
+        gv = st.number_input(f'Goles de {p["visita"]}', min_value=0, max_value=15, step=1,
                               value=existente["gv_pred"] if existente else 0,
                               key=f"gv_{p['id']}", label_visibility="collapsed")
     return gl, gv
@@ -1022,9 +1053,14 @@ def main():
         return
 
     es_admin = st.session_state.get("es_admin", False)
-    nombres_tabs = ["Predecir", "Ranking", "Resultados", "Mis predicciones"]
+    nombres_tabs = [
+        ":material/sports_soccer: Predecir",
+        ":material/leaderboard: Ranking",
+        ":material/sports_score: Resultados",
+        ":material/edit_note: Mis jugadas",
+    ]
     if es_admin:
-        nombres_tabs.append("Admin")
+        nombres_tabs.append(":material/admin_panel_settings: Admin")
     tabs = st.tabs(nombres_tabs)
     with tabs[0]:
         vista_predicciones()
