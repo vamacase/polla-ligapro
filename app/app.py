@@ -1,6 +1,7 @@
 """Polla Liga Pro Ecuador — webapp Streamlit (predicciones + ranking entre amigos)."""
 import os
 import hmac
+import importlib
 import sys
 import time
 from html import escape
@@ -15,7 +16,12 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from db import get_client  # noqa: E402
 from core.scoring import add_score_to_ranking, score_display  # noqa: E402
-from core.results_view import render_resultado  # noqa: E402
+import core.results_view as results_view  # noqa: E402
+# Streamlit reruns this script in a persistent Python process. Reload this
+# small presentation module so a Cloud deployment never keeps its old result
+# renderer in sys.modules after app.py has been updated.
+importlib.reload(results_view)
+render_resultado = results_view.render_resultado
 from services.auth import (  # noqa: E402
     autenticar_jugador, cambiar_pin, jugador_de_sesion, sign_session, validar_pin,
 )
@@ -50,7 +56,7 @@ LIGA_ID = 240  # unique-tournament de LigaPro Ecuador en SofaScore; también la
 # 1.60.0) para estilar contenedores individuales via key=. Las reglas sobre
 # data-testid internos (ej. stNumberInput) NO tienen garantía de estabilidad
 # entre versiones — se mantienen al mínimo y solo cosméticas.
-st.html("""
+st.markdown("""
 <style>
 :root {
   --polla-bg:#F7F7F2; --polla-card:#FFFFFF; --polla-accent:#6B9080;
@@ -195,7 +201,7 @@ st.html("""
     }
 }
 </style>
-""")
+""", unsafe_allow_html=True)
 
 
 @st.cache_resource
