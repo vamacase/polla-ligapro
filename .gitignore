@@ -5,4 +5,5 @@ __pycache__/
 *.pyc
 *.log
 sync/sync_resultados_log.txt
+sync/sync_notificaciones_log.txt
 sync/datos/
