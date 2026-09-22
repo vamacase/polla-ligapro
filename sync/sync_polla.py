@@ -96,12 +96,25 @@ def sync_fixture(anio=2026, max_partidos=10, ronda=None):
         print("No se encontraron próximos partidos.")
         return
 
+    db = get_client()
+
     if fase_grupos:
+        # Un partido ya marcado anulado (reprogramado sin fecha firme, ver
+        # README) puede seguir apareciendo en "próximos" de SofaScore con un
+        # timestamp viejo — si no se excluye acá, ocupa uno de los
+        # PARTIDOS_POR_FECHA_FASE_GRUPOS cupos por cercanía cronológica y
+        # desplaza a un partido real (pasó en Fecha 32: Barcelona SC vs
+        # Independiente del Valle desplazó a Manta FC vs Técnico
+        # Universitario, que quedó sin cargar).
+        event_ids_anulados = {
+            p["event_id"] for p in
+            db.table("partidos").select("event_id").eq("anulado", True).execute().data
+        }
+        partidos = [p for p in partidos if p["event_id"] not in event_ids_anulados]
         partidos = sorted(partidos, key=lambda p: p["fecha"])[:PARTIDOS_POR_FECHA_FASE_GRUPOS]
         for p in partidos:
             print(f"  [grupo] {p['grupo']}: {p['local']} vs {p['visitante']} ({p['fecha']})")
 
-    db = get_client()
     rondas_actualizadas = set()
     for p in partidos:
         ronda_polla = ronda if fase_grupos else p["ronda"]
