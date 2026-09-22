@@ -171,12 +171,17 @@ st.markdown("""
     /* Las pestañas existentes pasan a funcionar como navegación inferior;
        solo cambia su posición en pantalla, no la selección ni el contenido. */
     div[data-testid="stTabs"] [role="tablist"] {
-        position:fixed; left:0; right:0; bottom:0; z-index:1000;
+        position:fixed; left:0; right:0; bottom:0; z-index:1000000;
         display:flex; flex-wrap:nowrap; justify-content:space-around;
         padding:0.35rem 0.2rem max(0.45rem, env(safe-area-inset-bottom));
         background:var(--polla-card); border-top:1px solid var(--polla-border);
         box-shadow:0 -2px 10px rgba(47, 62, 56, 0.10);
     }
+    /* El botón "Deploy" del header de Streamlit Cloud (data-testid
+       verificado en 1.64.0) queda por encima del nav inferior con su
+       z-index de header por defecto. No aporta nada a los jugadores —
+       se oculta en móvil en vez de perseguir z-index. */
+    [data-testid="stAppDeployButton"] { display:none !important; }
     div[data-testid="stTabs"] [role="tablist"] button[role="tab"] {
         display:flex; flex:1 1 0; flex-direction:column; align-items:center;
         justify-content:center; min-width:0; min-height:2.8rem; padding:0.25rem 0.1rem;
