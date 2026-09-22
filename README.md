@@ -179,6 +179,25 @@ python sync_polla.py resultados     # trae marcadores reales, cierra partidos, c
 
 El ranking se recalcula solo (es una vista SQL sobre las predicciones).
 
+### ⚠️ Partidos duplicados por reprogramación (SofaScore)
+
+SofaScore a veces publica el **mismo partido dos veces con `event_id`
+distintos** cuando lo reprograma de horario (visto en Fecha 31: Manta FC vs
+Orense SC apareció primero a las 14:00 y luego otra vez a las 16:00). Una de
+las dos filas termina en `status: canceled` (sin marcador) y la otra sí se
+juega — pero **cuál de las dos es la cancelada no es predecible por orden de
+creación ni por hora**: en Fecha 31 la fila "vieja" (creada primero) resultó
+ser la que sí se jugó, y la "nueva" (reprogramada) fue la cancelada. Ya pasó
+al revés de lo intuitivo una vez — no asumir.
+
+**Antes de borrar cualquier fila de `partidos` por sospecha de duplicado**,
+verificar el `status` real de AMBOS `event_id` contra la API de SofaScore
+(`/api/v1/event/<id>`) — solo borrar la que tenga
+`status.type == "canceled"`. Si alguna ya tiene predicciones de jugadores
+(tabla `predicciones`), primero trasladarlas (`update partido_id`) a la fila
+que se conserva antes de borrar la otra; nunca borrar una fila con
+predicciones sin migrarlas.
+
 ### 7. Sync automático de resultados (GitHub Actions)
 
 `.github/workflows/sync-resultados.yml` corre `sync_polla.py resultados --prod`

@@ -475,7 +475,16 @@ def sync_resultados(anio=2026):
     sin este refresco el kickoff guardado queda desactualizado en silencio
     (bug real: los 8 partidos de Fecha 27 quedaron con el mismo timestamp
     provisional, y un jugador alcanzó a predecir después del kickoff real de
-    uno de ellos porque el bloqueo de la app usa el kickoff guardado)."""
+    uno de ellos porque el bloqueo de la app usa el kickoff guardado).
+
+    ⚠️ Partidos duplicados por reprogramación: SofaScore a veces publica el
+    mismo partido dos veces con event_id distintos (uno queda status=canceled
+    sin marcador, el otro sí se juega). CUÁL de los dos es el cancelado NO es
+    predecible por orden de creación ni por hora — en Fecha 31 fue al revés
+    de lo intuitivo (la fila más vieja fue la que sí se jugó). Antes de borrar
+    una fila "duplicada" de partidos, verificar el status real de AMBOS
+    event_id contra /api/v1/event/<id> y, si tiene predicciones, migrarlas
+    primero (ver README, sección "Partidos duplicados por reprogramación")."""
     from datetime import datetime, timezone
     db = get_client()
     pendientes = db.table("partidos").select("*").is_("gl_real", "null").execute().data
