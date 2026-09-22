@@ -182,6 +182,18 @@ st.markdown("""
        z-index de header por defecto. No aporta nada a los jugadores —
        se oculta en móvil en vez de perseguir z-index. */
     [data-testid="stAppDeployButton"] { display:none !important; }
+    /* Badge "Hosted with Streamlit" de Community Cloud: se inyecta fuera
+       del árbol de la app (no tiene data-testid propio de Streamlit,
+       distinto del botón Deploy de arriba) y también tapa el nav inferior
+       en móvil. Su clase/id trae un hash de build que cambia entre
+       despliegues — se cubre con varios selectores conocidos del widget
+       ("viewer badge") en vez de uno solo, para no depender de un hash
+       exacto no verificado. Si alguna variante no aplica en esta versión
+       de Streamlit Cloud, las otras igual lo ocultan. */
+    #viewerBadge, #stApp-viewer-badge,
+    div[id*="viewerBadge"], div[class*="viewerBadge"],
+    a[href*="streamlit.io/cloud"],
+    a[href^="https://streamlit.io"] { display:none !important; }
     div[data-testid="stTabs"] [role="tablist"] button[role="tab"] {
         display:flex; flex:1 1 0; flex-direction:column; align-items:center;
         justify-content:center; min-width:0; min-height:2.8rem; padding:0.25rem 0.1rem;
