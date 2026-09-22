@@ -23,7 +23,10 @@ create table if not exists partidos (
     gl_real int,                        -- goles local reales (null hasta jugarse)
     gv_real int,                        -- goles visita reales (null hasta jugarse)
     cerrado boolean not null default false,  -- true = ya no se puede predecir
-    cierre_predicciones timestamptz not null
+    cierre_predicciones timestamptz not null,
+    anulado boolean not null default false  -- true = excluido del cálculo de su
+        -- fecha (ver migrations/005_partido_anulado.sql); no otorga puntos ni
+        -- cuenta para considerar la fecha "completa". Nunca se borra la fila.
 );
 
 create table if not exists equipos (
@@ -71,6 +74,9 @@ select
     p.partido_id,
     pa.gl_real, pa.gv_real, p.gl_pred, p.gv_pred,
     case
+        -- Partido anulado (reprogramado sin fecha, suspendido, etc.): no
+        -- otorga puntos aunque tenga gl_real/gv_real cargado.
+        when pa.anulado then null
         when pa.gl_real is null or pa.gv_real is null then null
         -- Resultado exacto = 1 pto por el marcador + 1 pto por acertar
         -- también el 1X2 (implícito en el exacto) = 2 ptos.
@@ -79,6 +85,7 @@ select
         else 0
     end as puntos,
     case
+        when pa.anulado then null
         when pa.gl_real is null or pa.gv_real is null then null
         else (p.gl_pred = pa.gl_real and p.gv_pred = pa.gv_real)
     end as es_exacto

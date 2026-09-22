@@ -198,6 +198,37 @@ verificar el `status` real de AMBOS `event_id` contra la API de SofaScore
 que se conserva antes de borrar la otra; nunca borrar una fila con
 predicciones sin migrarlas.
 
+### ⚠️ Partido reprogramado sin fecha firme (cerrar la fecha sin él)
+
+Puede pasar que un partido de la fecha se suspenda/reprograme y SofaScore no
+publique un nuevo horario por días o semanas (visto en Fecha 31: Barcelona SC
+vs Independiente del Valle). Esperar a que se juegue bloquearía el cierre de
+toda la fecha —y el correo de resultados+tabla— indefinidamente.
+
+**No se borra la fila** (ya hay predicciones de los 10 jugadores contra
+ella). En su lugar, se marca `partidos.anulado = true`:
+
+```sql
+update partidos set anulado = true where id = <id_del_partido>;
+```
+
+Un partido `anulado`:
+- No otorga puntos a nadie aunque más tarde se le cargue `gl_real`/`gv_real`
+  (`v_puntos` lo excluye explícitamente).
+- No cuenta para que `notificar_fechas_terminadas()` considere la fecha
+  "completa" — el resto de la fecha se cierra y notifica con normalidad.
+- La fila y las predicciones existentes **se conservan** para auditoría.
+
+Si `sync_fixture()` vuelve a encontrar ese mismo `event_id` en el "próximos"
+de SofaScore (reaparece cuando le ponen un horario tentativo), el `upsert`
+por `event_id` lo reubica solo a la fecha que le corresponda — y conserva
+`anulado = true` (el `upsert` no toca esa columna). Hay que **des-anularlo a
+mano** (`update partidos set anulado = false where id = ...`) una vez que
+SofaScore confirme una fecha real y quede claro que sí se va a jugar dentro
+de esa fecha.
+
+Ver `migrations/005_partido_anulado.sql`.
+
 ### 7. Sync automático de resultados (GitHub Actions)
 
 `.github/workflows/sync-resultados.yml` corre `sync_polla.py resultados --prod`

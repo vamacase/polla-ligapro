@@ -584,12 +584,12 @@ def _hora_ecuador_hm(kickoff_iso: str) -> str:
 
 def notificar_fechas_terminadas():
     """Manda el correo de resultados+tabla a las fechas que se acaban de
-    completar (todos sus partidos ya tienen resultado real) y aún no fueron
-    notificadas. Se corre después de sync_resultados() en cada ejecución del
-    workflow — así no depende de que alguien abra la app."""
+    completar (todos sus partidos no anulados ya tienen resultado real) y aún
+    no fueron notificadas. Se corre después de sync_resultados() en cada
+    ejecución del workflow — así no depende de que alguien abra la app."""
     db = get_client()
     partidos = (db.table("partidos")
-                .select("id, fecha_ronda, kickoff, local, visita, gl_real, gv_real").execute().data)
+                .select("id, fecha_ronda, kickoff, local, visita, gl_real, gv_real, anulado").execute().data)
     por_ronda = {}
     for p in partidos:
         if p["fecha_ronda"] is not None:
@@ -603,7 +603,10 @@ def notificar_fechas_terminadas():
     for ronda, partidos_ronda in por_ronda.items():
         if ronda in ya_notificadas:
             continue
-        if not partidos_ronda or any(p["gl_real"] is None for p in partidos_ronda):
+        # Un partido anulado (reprogramado sin fecha, suspendido, etc.) no
+        # cuenta para considerar la fecha completa — se excluye del correo.
+        computables = [p for p in partidos_ronda if not p["anulado"]]
+        if not computables or any(p["gl_real"] is None for p in computables):
             continue  # fecha aún no completa
 
         try:
@@ -612,7 +615,7 @@ def notificar_fechas_terminadas():
         except Exception:
             continue  # ya notificada por otra corrida en paralelo — no reenviar
 
-        partidos_ronda_ord = sorted(partidos_ronda, key=lambda p: p["local"])
+        partidos_ronda_ord = sorted(computables, key=lambda p: p["local"])
         ids_ronda = [p["id"] for p in partidos_ronda_ord]
 
         ini, fin = rango_polla(numero_polla(ronda))
