@@ -28,9 +28,17 @@ def save_prediction(client, player_id: int, match_id: int, local_goals: int, awa
 
 
 def refresh_round_deadlines(client, round_number: int) -> int:
-    """Recalculate every deadline in one round after a fixture refresh."""
+    """Recalculate every deadline in one round after a fixture refresh.
+
+    Un partido anulado=true (reprogramado sin fecha firme, ver README) nunca
+    otorga puntos y puede conservar un kickoff viejo de cuando sí tenía
+    fecha -- si cuenta para el orden 1°/2°, desplaza al verdadero 2° partido
+    real y le hereda un cierre más temprano del que le corresponde (bug real
+    visto en Fecha 32: Barcelona-IDV, anulado con kickoff del 21/09, empujó
+    el cierre de Delfín vs Mushuc Runa de su propio kickoff a las 13:00).
+    Se excluye del cálculo igual que ya se hace en sync_fixture()."""
     rows = (
-        client.table("partidos").select("id,kickoff")
+        client.table("partidos").select("id,kickoff,anulado")
         .eq("fecha_ronda", round_number).execute().data
         or []
     )
@@ -41,6 +49,7 @@ def refresh_round_deadlines(client, round_number: int) -> int:
                 datetime.fromisoformat(row["kickoff"].replace("Z", "+00:00")),
             )
             for row in rows
+            if not row["anulado"]
         ]
     )
     for match_id, deadline in deadlines.items():
