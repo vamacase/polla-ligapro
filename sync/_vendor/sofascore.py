@@ -41,8 +41,13 @@ TOURN = 240
 SEASONS = {2021: 35552, 2022: 40503, 2023: 48720, 2024: 58043, 2025: 71184, 2026: 89674}
 PAUSA_MS = 600  # cortesía entre requests
 
+# Debe coincidir con la versión real del Chromium que lanza Playwright
+# (browser.version) -- un User-Agent desactualizado (ej. Chrome/120 en 2026,
+# con Chromium 143 instalado) contradice otras señales del navegador
+# (Sec-CH-UA, APIs disponibles) y es una huella de bot fácil de detectar.
+# Verificar con: python -c "from playwright.sync_api import sync_playwright as s; p=s().start(); print(p.chromium.launch().version)"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+      "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
 
 
 class SofaScore:
@@ -52,11 +57,30 @@ class SofaScore:
 
     def __enter__(self):
         self._pw = sync_playwright().start()
-        self.browser = self._pw.chromium.launch(
-            headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"])
-        self.ctx = self.browser.new_context(
-            user_agent=UA, locale="es-EC", viewport={"width": 1366, "height": 768})
+        # El Chromium embebido de Playwright (incluso con los flags anti-
+        # detección de abajo) empezó a caer en el captcha explícito de
+        # SofaScore -- verificado: un Chrome REAL instalado (channel="chrome")
+        # pasa sin problema. channel="chrome" requiere Chrome instalado en la
+        # máquina (cierto en la PC local donde corren las tareas de sync; si
+        # no está disponible -- ej. un entorno Linux sin Chrome -- cae al
+        # Chromium embebido, que puede volver a topar con el captcha).
+        try:
+            self.browser = self._pw.chromium.launch(
+                headless=self.headless, channel="chrome",
+                args=["--disable-blink-features=AutomationControlled"])
+            usar_chrome_real = True
+        except Exception:
+            self.browser = self._pw.chromium.launch(
+                headless=self.headless,
+                args=["--disable-blink-features=AutomationControlled"])
+            usar_chrome_real = False
+        # Con Chrome real, dejar que anuncie su propio User-Agent: forzar UA
+        # (pensado para el Chromium embebido) desalinearía otra vez la versión
+        # anunciada de la real, la misma señal de bot que causó el captcha.
+        ctx_kwargs = {"locale": "es-EC", "viewport": {"width": 1366, "height": 768}}
+        if not usar_chrome_real:
+            ctx_kwargs["user_agent"] = UA
+        self.ctx = self.browser.new_context(**ctx_kwargs)
         self.page = self.ctx.new_page()
         self.page.goto("https://www.sofascore.com/", wait_until="domcontentloaded", timeout=60000)
         for _ in range(30):
@@ -65,6 +89,15 @@ class SofaScore:
                 break
         else:
             raise RuntimeError("No se pudo pasar Cloudflare de SofaScore.")
+        # El título deja de decir "moment" tanto si pasó el challenge normal
+        # como si SofaScore redirigió a un captcha explícito (/captcha.html)
+        # -- en ese caso toda llamada a fetch_json() da 403 en silencio
+        # (bug real: sync_resultados reportó "0 actualizados" sin error).
+        # Fallar aquí, antes de devolver self, para que el llamador lo note.
+        if "captcha" in self.page.url.lower():
+            raise RuntimeError(
+                f"SofaScore mostró un captcha explícito ({self.page.url}) -- "
+                "bloqueo de bot, no el challenge normal de Cloudflare.")
         return self
 
     def __exit__(self, *a):

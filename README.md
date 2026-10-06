@@ -219,6 +219,41 @@ Un partido `anulado`:
   "completa" — el resto de la fecha se cierra y notifica con normalidad.
 - La fila y las predicciones existentes **se conservan** para auditoría.
 
+### ⚠️ SofaScore bloquea el scraper con un captcha explícito
+
+El scraper (`sync/_vendor/sofascore.py`) abre un navegador Playwright y pasa
+el challenge normal de Cloudflare la primera vez que visita sofascore.com.
+Visto el 2026-10-06: en vez del challenge normal, SofaScore redirigió a un
+**captcha explícito** (`/captcha.html`) y desde ahí toda llamada a la API
+devolvía `403` — y el código solo revisaba que el `<title>` dejara de decir
+"moment" (no la URL), así que `sync_resultados()` reportaba "0 actualizados"
+**sin ningún error**, indistinguible de "no hay nada nuevo que bajar". Ya se
+corrigió esa detección silenciosa: si la URL contiene `captcha`, el
+`__enter__` de `SofaScore` lanza `RuntimeError` explícito.
+
+Causa raíz encontrada: el Chromium embebido de Playwright (con
+`--disable-blink-features=AutomationControlled`) ya no basta para evadir el
+fingerprinting de SofaScore — probablemente por el `User-Agent` fijo
+desactualizado (`Chrome/120` anunciado sobre un Chromium real 143, una
+contradicción detectable). **Fix aplicado**: `SofaScore.__enter__()` ahora
+lanza el navegador con `channel="chrome"` (el Chrome real instalado en la
+máquina, no el Chromium embebido) y deja que anuncie su propio
+`User-Agent` real en vez de forzar uno fijo; si Chrome no está instalado
+cae al Chromium embebido con el UA fijo (mantenido actualizado a mano) como
+mejor esfuerzo.
+
+Si el bloqueo vuelve a aparecer a pesar de `channel="chrome"` (ej.
+SofaScore endurece aún más su detección, o cambia el fingerprint de red):
+1. Confirmar que es esto y no otra cosa: correr `sync_polla.py resultados
+   --prod` y revisar si el `RuntimeError` menciona `captcha.html`.
+2. Probar manualmente visitando sofascore.com en el Chrome real de la
+   máquina — si ahí también pide captcha, es un bloqueo a nivel de IP/red,
+   no de huella del navegador automatizado, y no hay fix de código posible
+   desde esta misma conexión (esperar, cambiar de red, o cargar resultados
+   a mano mientras se resuelve).
+3. Revisar que el `User-Agent` fijo de respaldo (`UA` en `sofascore.py`)
+   siga anunciando una versión de Chrome razonable para la fecha actual.
+
 Si `sync_fixture()` vuelve a encontrar ese mismo `event_id` en el "próximos"
 de SofaScore (reaparece cuando le ponen un horario tentativo), el `upsert`
 por `event_id` lo reubica solo a la fecha que le corresponda — y conserva
