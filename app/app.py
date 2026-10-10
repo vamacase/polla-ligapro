@@ -337,7 +337,8 @@ def calcular_estado_prediccion(ronda):
         if pr["partido_id"] not in ids_abiertos:
             contadas_cerrados[pr["jugador_id"]] = contadas_cerrados.get(pr["jugador_id"], 0) + 1
     return [{"id": j["id"], "nombre": j["nombre"], "n": contadas.get(j["id"], 0),
-              "total": n_abiertos + contadas_cerrados.get(j["id"], 0), "total_fecha": total_fecha}
+              "total": n_abiertos + contadas_cerrados.get(j["id"], 0), "total_fecha": total_fecha,
+              "fecha_cerrada": n_abiertos == 0}
             for j in jugadores]
 
 
@@ -614,13 +615,15 @@ def vista_predicciones():
             st.rerun()
 
 
-def fila_estado_jugador(nombre, n, total_fecha, completo, es_yo):
+def fila_estado_jugador(nombre, n, total_fecha, completo, es_yo, fecha_cerrada=False):
     """n/total_fecha es el conteo REAL mostrado en pantalla (ej. 6/8 si un
     jugador entró tarde y ya no alcanzó a predecir un partido cerrado).
-    `completo` decide el ícono ✅/⏳ y viene de fecha_totalmente_predicha() —
+    `completo` decide el ícono ✅ y viene de fecha_totalmente_predicha() —
     considera "completo" a quien predijo todo lo que alcanzó a ver, aunque
-    eso sea menos que total_fecha (ver calcular_estado_prediccion)."""
-    icono = "✅" if completo else "⏳"
+    eso sea menos que total_fecha (ver calcular_estado_prediccion). Si no
+    completó: ⏳ mientras quede algún partido abierto, ❌ cuando ya no puede
+    predecir nada más."""
+    icono = "✅" if completo else ("❌" if fecha_cerrada else "⏳")
     clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
     st.markdown(
         f'<div class="{clase}">'
@@ -872,7 +875,8 @@ def vista_mis_predicciones():
     estado_jugadores = calcular_estado_prediccion(ronda_sel)
     for e in estado_jugadores:
         completo = e["total"] > 0 and e["n"] >= e["total"]
-        fila_estado_jugador(e["nombre"], e["n"], e["total_fecha"], completo, e["id"] == jugador_id)
+        fila_estado_jugador(e["nombre"], e["n"], e["total_fecha"], completo, e["id"] == jugador_id,
+                            e["fecha_cerrada"])
 
     # Revelación: recién cuando LOS 10 terminaron de predecir TODA la fecha
     # se muestra qué puso cada quien en cada partido. Antes de eso nadie ve
