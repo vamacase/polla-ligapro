@@ -160,7 +160,8 @@ def programar_disparos_puntuales():
     from datetime import datetime, timezone, timedelta
 
     db = get_client()
-    pendientes = db.table("partidos").select("event_id, local, visita, kickoff").is_("gl_real", "null").execute().data
+    pendientes = (db.table("partidos").select("event_id, local, visita, kickoff")
+                  .is_("gl_real", "null").eq("anulado", False).execute().data)
     ahora = datetime.now(timezone.utc)
 
     bat = str(Path(__file__).resolve().parent / "sync_resultados_task.bat")
@@ -207,7 +208,8 @@ def programar_recordatorio_60min():
 
     db = get_client()
     pendientes = (db.table("partidos").select("fecha_ronda, kickoff")
-                  .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+                  .is_("gl_real", "null").not_.is_("fecha_ronda", "null")
+                  .eq("anulado", False).execute().data)
     ahora = datetime.now(timezone.utc)
 
     primer_kickoff_por_ronda = {}
@@ -265,12 +267,15 @@ def programar_recordatorio_faltantes():
     # Primer kickoff HISTÓRICO de cada ronda activa (no el primer
     # pendiente): si el partido 1 ya jugó pero quedan 2-8 sin resultado, el
     # disparo de este correo sigue siendo "al kickoff del partido 1", no del
-    # próximo pendiente.
+    # próximo pendiente. Los anulados se excluyen: con su kickoff viejo
+    # (ej. Barcelona-IDV, 21/09) pasaban por "primer partido" de la fecha y
+    # el disparo quedaba en el pasado — nunca se programaba.
     rondas_activas = {p["fecha_ronda"] for p in
                        db.table("partidos").select("fecha_ronda").is_("gl_real", "null")
-                       .not_.is_("fecha_ronda", "null").execute().data}
+                       .not_.is_("fecha_ronda", "null").eq("anulado", False).execute().data}
     todos_de_rondas_activas = (db.table("partidos").select("fecha_ronda, kickoff")
-                                .in_("fecha_ronda", list(rondas_activas)).execute().data
+                                .in_("fecha_ronda", list(rondas_activas))
+                                .eq("anulado", False).execute().data
                                 if rondas_activas else [])
     ahora = datetime.now(timezone.utc)
 
@@ -323,11 +328,14 @@ def enviar_recordatorio_faltantes():
     # partido sin resultado) — no solo los partidos sin resultado, porque
     # necesitamos ver si el PRIMER partido histórico de la fecha ya cerró,
     # aunque ya tenga resultado y esté fuera de "pendientes".
+    # Sin anulados: su predicción contaba como "ya predijo" (Fecha 32:
+    # Herrera y Mendoza no recibieron el aviso) y su kickoff viejo pasaba
+    # por "primer partido ya cerrado".
     rondas_activas = {p["fecha_ronda"] for p in
                        db.table("partidos").select("fecha_ronda").is_("gl_real", "null")
-                       .not_.is_("fecha_ronda", "null").execute().data}
+                       .not_.is_("fecha_ronda", "null").eq("anulado", False).execute().data}
     partidos = (db.table("partidos").select("id, fecha_ronda, kickoff, local, visita, cerrado")
-                .in_("fecha_ronda", list(rondas_activas)).execute().data
+                .in_("fecha_ronda", list(rondas_activas)).eq("anulado", False).execute().data
                 if rondas_activas else [])
     por_ronda = {}
     for p in partidos:
@@ -376,7 +384,8 @@ def enviar_recordatorios_60min():
     puntual se reintenta o corre dos veces, no reenvía."""
     db = get_client()
     partidos = (db.table("partidos").select("id, fecha_ronda, kickoff, local, visita")
-                .is_("gl_real", "null").not_.is_("fecha_ronda", "null").execute().data)
+                .is_("gl_real", "null").not_.is_("fecha_ronda", "null")
+                .eq("anulado", False).execute().data)
     por_ronda = {}
     for p in partidos:
         por_ronda.setdefault(p["fecha_ronda"], []).append(p)
@@ -824,7 +833,10 @@ def notificar_fechas_bloqueadas():
     from datetime import datetime, timezone
     db = get_client()
     ahora = datetime.now(timezone.utc)
-    partidos = db.table("partidos").select("id,fecha_ronda,kickoff,local,visita").execute().data or []
+    # Sin anulados: con su kickoff viejo ocupaba el lugar del 1° partido y
+    # la revelación salía al arrancar el 1° real, no el 2° (Fecha 32).
+    partidos = (db.table("partidos").select("id,fecha_ronda,kickoff,local,visita")
+                .eq("anulado", False).execute().data or [])
     jugadores = db.table("jugadores").select("id,nombre,email").execute().data or []
     por_ronda = {}
     for p in partidos:
