@@ -319,7 +319,10 @@ def calcular_estado_prediccion(ronda):
     que cierren los partidos (ver reglamento: la apuesta debe publicarse
     sin haber visto la de los demás).
     """
-    partidos_ronda = db().table("partidos").select("id, cerrado").eq("fecha_ronda", ronda).execute().data
+    # Un partido anulado no cuenta: sin este filtro, una predicción hecha
+    # sobre él marcaba ✅ a quien no había predicho ningún partido real.
+    partidos_ronda = (db().table("partidos").select("id, cerrado").eq("fecha_ronda", ronda)
+                      .eq("anulado", False).execute().data)
     ids_ronda = [p["id"] for p in partidos_ronda]
     total_fecha = len(ids_ronda)  # total real de partidos de la fecha — solo para mostrar en pantalla
     ids_abiertos = {p["id"] for p in partidos_ronda if not p["cerrado"]}
@@ -369,7 +372,7 @@ def intentar_notificar_todos_predijeron(ronda):
         return  # ya se envió (o falló el insert por otra razón) — no reintentar
 
     partidos_ronda = (db().table("partidos").select("id, local, visita")
-                       .eq("fecha_ronda", ronda).order("kickoff").execute().data)
+                       .eq("fecha_ronda", ronda).eq("anulado", False).order("kickoff").execute().data)
     ids_ronda = [p["id"] for p in partidos_ronda]
     todas = (db().table("v_puntos")
              .select("partido_id, gl_pred, gv_pred, es_exacto, jugadores(nombre)")
@@ -816,7 +819,7 @@ def vista_ranking():
 
 def vista_resultados():
     st.subheader("📋 Últimos resultados")
-    cerrados = (db().table("partidos").select("*").eq("cerrado", True)
+    cerrados = (db().table("partidos").select("*").eq("cerrado", True).eq("anulado", False)
                 .not_.is_("gl_real", "null").order("kickoff", desc=True).limit(20).execute().data)
     if not cerrados:
         st.info("Aún no hay resultados cargados.")
@@ -881,7 +884,8 @@ def vista_mis_predicciones():
         st.markdown("#### 🔓 Predicciones de todos — fecha completa")
         partidos_ronda_full = (db().table("partidos")
                                 .select("id, local, visita, kickoff, gl_real, gv_real")
-                                .eq("fecha_ronda", ronda_sel).order("kickoff").execute().data)
+                                .eq("fecha_ronda", ronda_sel).eq("anulado", False)
+                                .order("kickoff").execute().data)
         ids_ronda = [p["id"] for p in partidos_ronda_full]
         todas = (db().table("v_puntos")
                  .select("jugador_id, partido_id, gl_pred, gv_pred, es_exacto, jugadores(nombre)")
@@ -936,10 +940,11 @@ def vista_mis_predicciones():
                                     bool(f["es_exacto"]), f["jugador_id"] == jugador_id)
 
     st.markdown("#### Mis predicciones de esta fecha")
-    filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda)")
+    filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda, anulado)")
              .eq("jugador_id", jugador_id).execute().data)
     de_la_ronda = sorted(
-        (f for f in filas if f["partidos"]["fecha_ronda"] == ronda_sel),
+        (f for f in filas
+         if f["partidos"]["fecha_ronda"] == ronda_sel and not f["partidos"]["anulado"]),
         key=lambda f: f["partidos"]["kickoff"])
     if not de_la_ronda:
         st.info("Todavía no has predicho ningún partido de esta fecha.")
