@@ -182,6 +182,15 @@ envía partidos sin pronóstico; si todos están guardados, deshabilita el enví
 Otra pestaña no puede sobrescribir lo guardado: Postgres rechaza duplicados y
 actualizaciones. Los partidos que falten siguen disponibles hasta su cierre.
 
+El correo de revelación se titula **«Pronósticos de la Fecha N»**: puede
+publicarse al cierre aunque falten jugadas. Cada partido muestra los
+pronósticos recibidos sobre el total de jugadores y mantiene los grupos
+local/empate/visitante. Si faltan pronósticos, añade **«Sin predicción (N)»**
+con los nombres correspondientes; si todos predijeron, omite ese bloque.
+Los faltantes se calculan por ID de jugador y por partido, independientemente
+de que el jugador tenga correo configurado. No se inventan marcadores ni se
+modifican las predicciones.
+
 Después de jugada la fecha:
 
 ```bash

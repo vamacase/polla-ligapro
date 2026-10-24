@@ -35,7 +35,8 @@ def test_round_reveal_is_enqueued_once_per_player():
 
     enqueue_all_predicted(
         object(), "ana@example.test", 8, 30,
-        [{"local": "Manta", "visita": "Aucas", "grupos": {"local": [], "empate": [], "visita": []}}],
+        [{"local": "Manta", "visita": "Aucas", "grupos": {"local": [], "empate": [], "visita": []},
+          "total_jugadores": 1, "sin_prediccion": ["Ana"]}],
         enqueue=fake_enqueue,
     )
 

@@ -26,7 +26,7 @@ from services.auth import (  # noqa: E402
     autenticar_jugador, cambiar_pin, jugador_de_sesion, sign_session, validar_pin,
 )
 from services.predictions import save_prediction  # noqa: E402
-from services.notification_payloads import enqueue_all_predicted, enqueue_confirmation  # noqa: E402
+from services.notification_payloads import build_reveal_matches, enqueue_all_predicted, enqueue_confirmation  # noqa: E402
 from streamlit_cookies_controller import CookieController  # noqa: E402
 
 st.set_page_config(page_title="Polla Liga Pro", page_icon="⚽", layout="centered")
@@ -376,25 +376,10 @@ def intentar_notificar_todos_predijeron(ronda):
                        .eq("fecha_ronda", ronda).eq("anulado", False).order("kickoff").execute().data)
     ids_ronda = [p["id"] for p in partidos_ronda]
     todas = (db().table("v_puntos")
-             .select("partido_id, gl_pred, gv_pred, es_exacto, jugadores(nombre)")
+             .select("partido_id, jugador_id, gl_pred, gv_pred, es_exacto")
              .in_("partido_id", ids_ronda).execute().data)
-    por_partido = {}
-    for f in todas:
-        por_partido.setdefault(f["partido_id"], []).append(f)
-
-    cuerpo = []
-    for p in partidos_ronda:
-        grupos = {"local": [], "empate": [], "visita": []}
-        for f in por_partido.get(p["id"], []):
-            grupos[clasificar_resultado(f["gl_pred"], f["gv_pred"])].append({
-                "nombre": f["jugadores"]["nombre"], "gl": f["gl_pred"], "gv": f["gv_pred"],
-                "es_exacto": bool(f["es_exacto"]),
-            })
-        for g in grupos.values():
-            g.sort(key=lambda x: x["nombre"])
-        cuerpo.append({"local": p["local"], "visita": p["visita"], "grupos": grupos})
-
-    jugadores = db().table("jugadores").select("id, email").execute().data
+    jugadores = db().table("jugadores").select("id, nombre, email").execute().data
+    cuerpo = build_reveal_matches(partidos_ronda, jugadores, todas)
     for jugador in jugadores:
         if jugador["email"]:
             enqueue_all_predicted(db(), jugador["email"], jugador["id"], ronda, cuerpo)

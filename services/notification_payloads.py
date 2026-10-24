@@ -10,6 +10,36 @@ from email_notif import (
 from repositories.notifications import enqueue_notification
 
 
+def build_reveal_matches(matches: list[dict], players: list[dict], predictions: list[dict]) -> list[dict]:
+    """Group actual predictions and identify missing players by ID per match."""
+    names = {player["id"]: player["nombre"] for player in players}
+    by_match = {match["id"]: [] for match in matches}
+    for prediction in predictions:
+        by_match[prediction["partido_id"]].append(prediction)
+
+    result = []
+    for match in matches:
+        groups = {"local": [], "empate": [], "visita": []}
+        predicted = set()
+        for prediction in by_match[match["id"]]:
+            player_id = prediction["jugador_id"]
+            predicted.add(player_id)
+            gl, gv = prediction["gl_pred"], prediction["gv_pred"]
+            outcome = "empate" if gl == gv else ("local" if gl > gv else "visita")
+            groups[outcome].append({
+                "nombre": names[player_id], "gl": gl, "gv": gv,
+                "es_exacto": bool(prediction.get("es_exacto")),
+            })
+        for group in groups.values():
+            group.sort(key=lambda row: row["nombre"])
+        result.append({
+            "local": match["local"], "visita": match["visita"], "grupos": groups,
+            "total_jugadores": len(players),
+            "sin_prediccion": sorted(name for player_id, name in names.items() if player_id not in predicted),
+        })
+    return result
+
+
 def enqueue_confirmation(
     db,
     recipient: str,

@@ -19,6 +19,7 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 
 from core.scoring import ranking_email_breakdown
 
@@ -162,12 +163,11 @@ def enviar_confirmacion(destinatario: str, nombre_jugador: str, ronda, filas: li
 
 
 def render_todos_predijeron(ronda, partidos: list[dict]) -> tuple[str, str]:
-    """partidos: [{"local": str, "visita": str,
-                    "grupos": {"local": [{"nombre","gl","gv"}, ...], "empate": [...], "visita": [...]}}, ...]
+    """Render one reveal card per match, including roster members who missed it.
 
-    Se manda a todos los jugadores cuando el último termina de predecir la
-    fecha completa — la misma revelación de "quién le fue a quién" que hoy
-    se ve dentro de la app, agrupada por resultado (local/empate/visita)."""
+    Each match has outcome groups, total_jugadores and sin_prediccion.
+    Revelation can occur at the deadline even when predictions are incomplete.
+    """
 
     def _grupo_html(etiqueta: str, filas: list[dict], destacado: bool) -> str:
         if not filas:
@@ -201,16 +201,31 @@ def render_todos_predijeron(ronda, partidos: list[dict]) -> tuple[str, str]:
     bloques = []
     for p in partidos:
         grupos = p["grupos"]
+        recibidas = sum(len(filas) for filas in grupos.values())
+        faltantes = p["sin_prediccion"]
+        sin_prediccion_html = ""
+        if faltantes:
+            nombres_html = "".join(
+                f'<tr><td style="padding:2px 0; font-size:13px; color:{_MUTED};">{escape(nombre)}</td></tr>'
+                for nombre in faltantes
+            )
+            sin_prediccion_html = f"""
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px; border-top:1px solid {_BORDER};">
+              <tr><td style="padding-top:10px; font-size:12px; font-weight:700; color:{_MUTED};">Sin predicción ({len(faltantes)})</td></tr>
+              {nombres_html}
+            </table>"""
         bloques.append(f"""
         <tr><td style="background:{_WHITE}; border-radius:12px; box-shadow:0 1px 3px rgba(47,62,56,0.08); overflow:hidden;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr><td style="padding:14px 16px 10px;">
               <span style="font-size:14.5px; font-weight:700; color:{_TEXT};">{p['local']} vs {p['visita']}</span>
+              <div style="margin-top:5px; font-size:12px; color:{_MUTED};">Pronósticos recibidos: {recibidas} de {p["total_jugadores"]}</div>
             </td></tr>
             <tr><td style="padding:0 16px 16px;">
               {_grupo_html(p['local'], grupos['local'], False)}
               {_grupo_html("Empate", grupos['empate'], False)}
               {_grupo_html(p['visita'], grupos['visita'], False)}
+              {sin_prediccion_html}
             </td></tr>
           </table>
         </td></tr>
@@ -218,8 +233,8 @@ def render_todos_predijeron(ronda, partidos: list[dict]) -> tuple[str, str]:
 
     cuerpo = "".join(bloques)
     html = _envolver(
-        "🔓", f"Ya predijeron los 10 — Fecha {ronda}",
-        "Así va a jugar cada quien esta fecha:",
+        "🔓", f"Pronósticos de la Fecha {ronda}",
+        "Estas son las jugadas recibidas. En cada partido se indica quién no registró una predicción.",
         cuerpo, "Ver todos los partidos",
         "entra a la app para ver el detalle de marcadores exactos.")
     return f"Polla Liga Pro — predicciones de todos (Fecha {ronda})", html

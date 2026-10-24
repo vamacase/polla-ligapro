@@ -47,7 +47,7 @@ from services.predictions import refresh_round_deadlines  # noqa: E402
 from email_notif import send_html  # noqa: E402
 from services.notification_worker import process_notifications  # noqa: E402
 from services.notification_payloads import (  # noqa: E402
-    enqueue_all_predicted, enqueue_missing_predictions_reminder, enqueue_polla_finished,
+    build_reveal_matches, enqueue_all_predicted, enqueue_missing_predictions_reminder, enqueue_polla_finished,
     enqueue_polla_tied, enqueue_reminder_60min, enqueue_round_finished,
 )
 
@@ -844,7 +844,6 @@ def notificar_fechas_bloqueadas():
             por_ronda.setdefault(p["fecha_ronda"], []).append(p)
     ya = {n["fecha_ronda"] for n in db.table("notificaciones_enviadas").select("fecha_ronda")
           .eq("tipo", "todos_predijeron").execute().data}
-    nombres = {j["id"]: j["nombre"] for j in jugadores}
     for ronda, grupo in por_ronda.items():
         orden = sorted(grupo, key=lambda p: p["kickoff"])
         if len(orden) < 2 or datetime.fromisoformat(orden[1]["kickoff"].replace("Z", "+00:00")) > ahora or ronda in ya:
@@ -856,14 +855,7 @@ def notificar_fechas_bloqueadas():
             continue
         ids = [p["id"] for p in orden]
         preds = db.table("predicciones").select("jugador_id,partido_id,gl_pred,gv_pred").in_("partido_id", ids).execute().data or []
-        por_partido = {pid: {"local": [], "empate": [], "visita": []} for pid in ids}
-        for pr in preds:
-            clave = "empate" if pr["gl_pred"] == pr["gv_pred"] else ("local" if pr["gl_pred"] > pr["gv_pred"] else "visita")
-            por_partido[pr["partido_id"]][clave].append({"nombre": nombres.get(pr["jugador_id"], "Jugador"), "gl": pr["gl_pred"], "gv": pr["gv_pred"], "es_exacto": False})
-        matches = [{"local": p["local"], "visita": p["visita"], "grupos": por_partido[p["id"]]} for p in orden]
-        for m in matches:
-            for lista in m["grupos"].values():
-                lista.sort(key=lambda x: x["nombre"])
+        matches = build_reveal_matches(orden, jugadores, preds)
         for j in jugadores:
             if j.get("email"):
                 enqueue_all_predicted(db, j["email"], j["id"], ronda, matches)
