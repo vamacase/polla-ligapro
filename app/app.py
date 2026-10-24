@@ -510,7 +510,8 @@ def tarjeta_partido(p, mis_pred):
             unsafe_allow_html=True)
         gl = st.number_input(f'Goles de {p["local"]}', min_value=0, max_value=15, step=1,
                               value=existente["gl_pred"] if existente else 0,
-                              key=f"gl_{p['id']}", label_visibility="collapsed")
+                              key=f"{'saved_gl' if existente else 'gl'}_{p['id']}",
+                              label_visibility="collapsed", disabled=existente is not None)
 
         st.markdown(
             f'<div class="polla-fila-equipo" role="img" aria-label="Escudo de {visita_accesible}">'
@@ -518,7 +519,10 @@ def tarjeta_partido(p, mis_pred):
             unsafe_allow_html=True)
         gv = st.number_input(f'Goles de {p["visita"]}', min_value=0, max_value=15, step=1,
                               value=existente["gv_pred"] if existente else 0,
-                              key=f"gv_{p['id']}", label_visibility="collapsed")
+                              key=f"{'saved_gv' if existente else 'gv'}_{p['id']}",
+                              label_visibility="collapsed", disabled=existente is not None)
+        if existente:
+            st.caption("🔒 Pronóstico guardado y definitivo.")
     return gl, gv
 
 
@@ -538,7 +542,7 @@ def vista_predicciones():
         if guardados:
             st.success(f"✅ ¡{guardados} predicciones guardadas correctamente!")
         if rechazados:
-            st.error("⚠️ No se guardaron (el partido ya inició): " + ", ".join(rechazados))
+            st.error("⚠️ No se guardaron (plazo cerrado o pronóstico ya guardado): " + ", ".join(rechazados))
 
     partidos = cargar_partidos_abiertos()
     if not partidos:
@@ -547,6 +551,7 @@ def vista_predicciones():
 
     mis_pred = cargar_predicciones(jugador_id)
     st.caption("Marcador exacto: 1 pt por Exacto + 1 pt por G/E/P (2 pts total); G/E/P no exacto: 1 pt; fallo: 0.")
+    st.info("Al guardar, tus pronósticos quedan definitivos y no se pueden modificar. Revisa los marcadores antes de enviarlos.")
 
     rondas = sorted({p["fecha_ronda"] for p in partidos}, key=lambda r: (r is None, r))
     ronda_sel = selector_fecha(rondas, key="ronda_pred")
@@ -558,13 +563,8 @@ def vista_predicciones():
     else:
         st.success(f"✅ Ya predijiste los {len(partidos_ronda)} partidos de esta fecha.")
 
-    # Seguro: una vez que TODOS predijeron TODA la fecha, se revela en "Mis
-    # predicciones" — a partir de ahí ya no se puede editar, para que nadie
-    # vea las apuestas de los demás y luego cambie la suya antes del cierre.
-    # Se consulta el candado persistido (no se recalcula en vivo): si luego
-    # se anula manualmente una predicción individual (ej. por tardía), el
-    # conteo deja de dar "100% completa" pero la fecha ya reveló apuestas —
-    # debe seguir congelada para todos, no reabrirse.
+    # La revelación sigue impidiendo nuevas jugadas para una fecha ya visible.
+    # Cada pronóstico guardado es definitivo, aunque la fecha aún no se revele.
     if fecha_ya_revelada(ronda_sel):
         st.info("🔒 Todos ya predijeron esta fecha — las predicciones quedaron congeladas. "
                 "Ve a 'Mis predicciones' para verlas todas.")
@@ -575,9 +575,11 @@ def vista_predicciones():
         for i, p in enumerate(partidos_ronda, start=1):
             st.caption(f"Partido {i}")
             gl, gv = tarjeta_partido(p, mis_pred)
-            valores[p["id"]] = (gl, gv)
+            if p["id"] not in mis_pred:
+                valores[p["id"]] = (gl, gv)
 
-        enviado = st.form_submit_button("Guardar predicciones", type="primary")
+        enviado = st.form_submit_button("Guardar predicciones definitivas", type="primary",
+                                       disabled=not faltantes)
         if enviado:
             # La RPC de Postgres decide con su propio reloj si el plazo sigue
             # abierto, aunque el formulario se haya cargado antes o el sync
@@ -595,7 +597,8 @@ def vista_predicciones():
                 try:
                     save_prediction(db(), jugador_id, partido_id, gl, gv)
                 except Exception as error:
-                    if "plazo cerrado" in str(error).lower():
+                    if any(motivo in str(error).lower()
+                           for motivo in ("plazo cerrado", "prediccion ya guardada", "prediccion definitiva")):
                         rechazados.append(p["local"] + " vs " + p["visita"])
                         continue
                     raise

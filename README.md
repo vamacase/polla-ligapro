@@ -129,6 +129,13 @@ Aplica también `migrations/003_prediction_deadlines.sql` antes de desplegar el
 guardado de pronósticos. Añade el cierre por partido y una función de base de
 datos que rechaza cualquier pronóstico enviado después de su plazo.
 
+Aplica después `migrations/006_immutable_predictions.sql` en desarrollo y
+producción **antes de desplegar la interfaz de pronósticos definitivos**.
+Reemplaza el guardado con una inserción sin sobrescritura y añade un trigger
+que rechaza actualizaciones, incluso directas, sobre `predicciones`.
+La regla incluye todos los pronósticos existentes: conserva sus marcadores,
+pero ya no permite editarlos. No requiere recargar ni borrar datos.
+
 La comprobación local sin servicios externos es `python -m pytest -q`.
 En desarrollo, verifica además login, refresco, rechazo de cookie manipulada,
 bloqueo al quinto fallo, cambio de PIN y ausencia de credenciales en el panel.
@@ -168,8 +175,12 @@ cd sync
 python sync_polla.py fixture        # sube los próximos partidos
 ```
 
-Los amigos entran a la webapp y predicen hasta el kickoff de cada partido
-(se cierra automáticamente al iniciar).
+Los amigos entran a la webapp y envían sus pronósticos antes del cierre
+configurado de cada partido. **Guardar es definitivo**: los marcadores guardados
+quedan de solo lectura, aunque todavía no venza el plazo. El formulario solo
+envía partidos sin pronóstico; si todos están guardados, deshabilita el envío.
+Otra pestaña no puede sobrescribir lo guardado: Postgres rechaza duplicados y
+actualizaciones. Los partidos que falten siguen disponibles hasta su cierre.
 
 Después de jugada la fecha:
 
@@ -193,10 +204,11 @@ al revés de lo intuitivo una vez — no asumir.
 **Antes de borrar cualquier fila de `partidos` por sospecha de duplicado**,
 verificar el `status` real de AMBOS `event_id` contra la API de SofaScore
 (`/api/v1/event/<id>`) — solo borrar la que tenga
-`status.type == "canceled"`. Si alguna ya tiene predicciones de jugadores
-(tabla `predicciones`), primero trasladarlas (`update partido_id`) a la fila
-que se conserva antes de borrar la otra; nunca borrar una fila con
-predicciones sin migrarlas.
+`status.type == "canceled"`. Si alguna ya tiene predicciones de jugadores,
+no borrarla ni trasladarlas con un `update partido_id`: el bloqueo de
+pronósticos definitivos rechaza también ese cambio. Una corrección de este
+tipo requiere una migración administrativa transaccional revisada que conserve
+los marcadores y restablezca la protección; nunca borrar pronósticos válidos.
 
 ### ⚠️ Partido reprogramado sin fecha firme (cerrar la fecha sin él)
 
