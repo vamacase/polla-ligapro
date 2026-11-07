@@ -219,10 +219,15 @@ def programar_recordatorio_60min():
         if actual is None or ko < actual:
             primer_kickoff_por_ronda[p["fecha_ronda"]] = ko
 
+    ya_notificadas = {n["fecha_ronda"] for n in db.table("notificaciones_enviadas")
+                      .select("fecha_ronda").eq("tipo", "recordatorio_60min").execute().data}
+
     bat = str(Path(__file__).resolve().parent / "sync_recordatorio_task.bat")
     sufijo_ambiente = "" if ES_PROD else "_dev"
     creadas = pasadas = fallidas = 0
     for ronda, primer_ko in primer_kickoff_por_ronda.items():
+        if ronda in ya_notificadas:
+            continue
         disparo = primer_ko - timedelta(minutes=60)
         if disparo <= ahora:
             pasadas += 1
@@ -286,10 +291,15 @@ def programar_recordatorio_faltantes():
         if actual is None or ko < actual:
             primer_kickoff_por_ronda[p["fecha_ronda"]] = ko
 
+    ya_notificadas = {n["fecha_ronda"] for n in db.table("notificaciones_enviadas")
+                      .select("fecha_ronda").eq("tipo", "recordatorio_faltantes").execute().data}
+
     bat = str(Path(__file__).resolve().parent / "sync_recordatorio_faltantes_task.bat")
     sufijo_ambiente = "" if ES_PROD else "_dev"
     creadas = pasadas = fallidas = 0
     for ronda, primer_ko in primer_kickoff_por_ronda.items():
+        if ronda in ya_notificadas:
+            continue
         disparo = primer_ko
         if disparo <= ahora:
             pasadas += 1
@@ -435,13 +445,24 @@ def enviar_recordatorios_60min():
         top3 = [r["nombre"] for r in ranking[:3]] if hay_puntos else []
         nombres_top3 = set(top3)
 
-        for j in jugadores:
-            if not j["email"]:
-                continue
+        # Solo a quien aún no predijo todos los partidos de la fecha: a quien
+        # ya completó, el aviso de "haz tu pronóstico" no le sirve.
+        ids_fecha = [p["id"] for p in
+                     db.table("partidos").select("id").eq("fecha_ronda", ronda)
+                     .eq("anulado", False).execute().data]
+        preds_fecha = (db.table("predicciones").select("jugador_id").in_("partido_id", ids_fecha)
+                       .execute().data if ids_fecha else [])
+        n_preds = {}
+        for pr in preds_fecha:
+            n_preds[pr["jugador_id"]] = n_preds.get(pr["jugador_id"], 0) + 1
+        destinatarios = [j for j in jugadores
+                         if j["email"] and n_preds.get(j["id"], 0) < len(ids_fecha)]
+
+        for j in destinatarios:
             enqueue_reminder_60min(db, j["email"], j["id"], j["nombre"], ronda, lista_partidos,
                                     top3, j["nombre"] in nombres_top3)
         print(f"  [ok] recordatorio 60min encolado — Fecha {ronda} "
-              f"({sum(1 for j in jugadores if j['email'])} jugadores)")
+              f"({len(destinatarios)} jugadores sin completar)")
 
         sufijo_ambiente = "" if ES_PROD else "_dev"
         import subprocess
@@ -583,6 +604,12 @@ def sync_resultados(anio=2026):
         for ronda_corregida in rondas_con_kickoff_corregido:
             refresh_round_deadlines(db, ronda_corregida)
         print(f"{kickoffs_corregidos} kickoffs corregidos con el horario real de SofaScore.")
+        # Las tareas puntuales se programaron con el horario provisional: sin
+        # esto, el recordatorio de 60 min de la Fecha 36 salió 3h30 antes y el
+        # de faltantes corrió antes del 1er partido real y no envió nada.
+        programar_disparos_puntuales()
+        programar_recordatorio_60min()
+        programar_recordatorio_faltantes()
 
 
 def _hora_ecuador(kickoff_iso: str) -> str:
