@@ -260,6 +260,16 @@ def a_local(ts) -> pd.Timestamp:
         return t.tz_convert(timezone(timedelta(hours=-5)))
 
 
+# strftime("%a") depende del locale del servidor y sale en inglés ("Sat").
+DIAS_ES = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
+
+
+def dia_hora_local(ts) -> str:
+    """'sáb 07/11 14:00' en hora de Ecuador."""
+    t = a_local(ts)
+    return f"{DIAS_ES[t.weekday()]} {t:%d/%m %H:%M}"
+
+
 def badge_cuenta_regresiva(kickoff, ahora=None) -> str:
     ahora = ahora or datetime.now(timezone.utc)
     restante = pd.to_datetime(kickoff) - ahora
@@ -482,7 +492,7 @@ def tarjeta_partido(p, mis_pred):
     local_accesible = escape(str(p["local"]), quote=True)
     visita_accesible = escape(str(p["visita"]), quote=True)
     with st.container(border=True, key=f"card_partido_{p['id']}"):
-        kickoff_local = a_local(p["kickoff"]).strftime("%a %d/%m %H:%M")
+        kickoff_local = dia_hora_local(p["kickoff"])
         c_info, c_badge = st.columns([2, 1])
         with c_info:
             st.markdown(f'<div class="polla-fila-hora">{kickoff_local}</div>', unsafe_allow_html=True)
@@ -992,7 +1002,7 @@ def vista_admin():
         p = proximos[0]
         st.markdown(
             f"⏱️ **Próximo cierre:** {p['local']} vs {p['visita']} — "
-            f"{a_local(p['kickoff']).strftime('%a %d/%m %H:%M')} {badge_cuenta_regresiva(p['kickoff'])}",
+            f"{dia_hora_local(p['kickoff'])} {badge_cuenta_regresiva(p['kickoff'])}",
             unsafe_allow_html=True)
 
     rondas = sorted({p["fecha_ronda"] for p in partidos if p["fecha_ronda"] is not None}, reverse=True)
@@ -1003,7 +1013,7 @@ def vista_admin():
     st.markdown("#### Partidos de la fecha")
     tabla_partidos = pd.DataFrame([{
         "Partido": f"{p['local']} vs {p['visita']}",
-        "Hora (Ecuador)": a_local(p["kickoff"]).strftime("%a %d/%m %H:%M"),
+        "Hora (Ecuador)": dia_hora_local(p["kickoff"]),
         "Estado": "Cerrado" if p["cerrado"] else "Abierto",
         "Resultado": f"{p['gl_real']}-{p['gv_real']}" if p["gl_real"] is not None else "—",
     } for p in partidos_ronda])

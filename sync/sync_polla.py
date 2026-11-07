@@ -621,8 +621,12 @@ def _hora_ecuador(kickoff_iso: str) -> str:
     a_local() en app.py, pero sin pandas/tzdata como camino principal)."""
     import pandas as pd
     from datetime import timezone, timedelta
-    t = pd.to_datetime(kickoff_iso)
-    return t.tz_convert(timezone(timedelta(hours=-5))).strftime("%a %d/%m")
+    t = pd.to_datetime(kickoff_iso).tz_convert(timezone(timedelta(hours=-5)))
+    return f"{DIAS_ES[t.weekday()]} {t:%d/%m}"
+
+
+# strftime("%a") depende del locale del sistema y salía en inglés ("Sat").
+DIAS_ES = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 
 
 def _hora_ecuador_hm(kickoff_iso: str) -> str:
@@ -630,8 +634,8 @@ def _hora_ecuador_hm(kickoff_iso: str) -> str:
     orden de kickoff con su horario exacto)."""
     import pandas as pd
     from datetime import timezone, timedelta
-    t = pd.to_datetime(kickoff_iso)
-    return t.tz_convert(timezone(timedelta(hours=-5))).strftime("%a %d/%m %H:%M")
+    t = pd.to_datetime(kickoff_iso).tz_convert(timezone(timedelta(hours=-5)))
+    return f"{DIAS_ES[t.weekday()]} {t:%d/%m %H:%M}"
 
 
 def notificar_fechas_terminadas():
