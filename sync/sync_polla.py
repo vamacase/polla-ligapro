@@ -852,10 +852,11 @@ def cerrar_por_kickoff():
 
 
 def notificar_fechas_bloqueadas():
-    """Encola la revelación al iniciar el segundo partido de cada fecha.
-
-    No exige que todos hayan predicho: el cierre del segundo kickoff es el
-    evento que congela la fecha y revela las predicciones disponibles.
+    """Encola la revelación de cada fecha en cuanto pase lo primero de:
+    todos los jugadores completaron sus predicciones, o arrancó el segundo
+    partido (ahí se cierra el plazo y se revelan las predicciones que haya).
+    La app también la dispara al instante cuando el último jugador completa;
+    esto es el respaldo durable. El candado evita duplicados.
     """
     from datetime import datetime, timezone
     db = get_client()
@@ -872,16 +873,23 @@ def notificar_fechas_bloqueadas():
     ya = {n["fecha_ronda"] for n in db.table("notificaciones_enviadas").select("fecha_ronda")
           .eq("tipo", "todos_predijeron").execute().data}
     for ronda, grupo in por_ronda.items():
+        if ronda in ya or len(grupo) < 2:
+            continue
         orden = sorted(grupo, key=lambda p: p["kickoff"])
-        if len(orden) < 2 or datetime.fromisoformat(orden[1]["kickoff"].replace("Z", "+00:00")) > ahora or ronda in ya:
+        ids = [p["id"] for p in orden]
+        preds = db.table("predicciones").select("jugador_id,partido_id,gl_pred,gv_pred").in_("partido_id", ids).execute().data or []
+        segundo_arranco = datetime.fromisoformat(orden[1]["kickoff"].replace("Z", "+00:00")) <= ahora
+        n_preds = {}
+        for pr in preds:
+            n_preds[pr["jugador_id"]] = n_preds.get(pr["jugador_id"], 0) + 1
+        todos_completaron = bool(jugadores) and all(n_preds.get(j["id"], 0) >= len(ids) for j in jugadores)
+        if not (segundo_arranco or todos_completaron):
             continue
         try:
             db.table("notificaciones_enviadas").insert({"fecha_ronda": ronda, "tipo": "todos_predijeron"}).execute()
         except Exception as error:
             print(f"  [!] revelación Fecha {ronda}: no se pudo crear el candado ({error})")
             continue
-        ids = [p["id"] for p in orden]
-        preds = db.table("predicciones").select("jugador_id,partido_id,gl_pred,gv_pred").in_("partido_id", ids).execute().data or []
         matches = build_reveal_matches(orden, jugadores, preds)
         for j in jugadores:
             if j.get("email"):

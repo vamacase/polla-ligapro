@@ -596,8 +596,11 @@ def vista_predicciones():
                     enqueue_confirmation(
                         db(), jugador["email"], st.session_state["jugador_nombre"], ronda_sel,
                         confirmadas, player_id=jugador_id)
-                # La revelación se dispara de forma durable desde el sync al
-                # kickoff del segundo partido, incluso si faltan predicciones.
+                # Revelación: sale ya si con este guardado todos completaron la
+                # fecha; si no, el sync la manda al kickoff del 2° partido (y
+                # también la cubre si este disparo no alcanzara a encolarse).
+                if fecha_totalmente_predicha(calcular_estado_prediccion(ronda_sel)):
+                    intentar_notificar_todos_predijeron(ronda_sel)
 
             st.session_state["mensaje_guardado"] = (guardados, rechazados)
             st.rerun()
