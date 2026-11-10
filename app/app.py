@@ -165,6 +165,12 @@ st.markdown("""
   background:var(--polla-exacto); color:var(--polla-text); font-weight:800;
 }
 
+.polla-tuyo {
+  display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+  margin-top:0.45rem; padding-top:0.45rem; border-top:1px dashed var(--polla-border);
+  font-size:0.82rem; color:var(--polla-muted);
+}
+.polla-tuyo b { color:var(--polla-text); font-variant-numeric:tabular-nums; }
 .polla-rank-row {
   display:flex; align-items:center; gap:0.7rem;
   padding:0.5rem 0.8rem; border-radius:0.75rem; margin-bottom:0.4rem;
@@ -174,15 +180,23 @@ st.markdown("""
   border-left:4px solid var(--polla-accent);
   background:#EEF3F0;
 }
-.polla-medalla { font-size:1.3rem; width:1.8rem; text-align:center; }
-
-/* Columna del grupo que acertó el resultado real, en la revelación por
-   partido (agrupado local/empate/visita). [class*=] porque .st-key-<key>
-   se aplica al bloque interno del st.container, no al wrapper con borde. */
-[class*="st-key-grupo_correcto_"] {
-  border-color: var(--polla-accent) !important;
-  border-width: 2px !important;
+.polla-medalla { font-size:1.3rem; width:1.8rem; text-align:center; color:var(--polla-muted); }
+.polla-medalla small { font-size:0.85rem; font-weight:700; }
+.polla-rank-nombre { flex:1; min-width:0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.polla-rank-row--yo .polla-rank-nombre { font-weight:800; }
+.polla-rank-detalle { font-size:0.72rem; color:var(--polla-muted); white-space:nowrap; }
+.polla-rank-puntos {
+  min-width:2.2rem; text-align:right; font-size:1.15rem; font-weight:800;
+  font-variant-numeric:tabular-nums; color:var(--polla-text);
 }
+
+/* Encabezado de cada grupo (local/empate/visita) en la revelación. */
+.polla-grupo {
+  display:flex; justify-content:space-between; align-items:center;
+  margin:0.6rem 0 0.2rem; padding:0.25rem 0.5rem; border-radius:0.4rem;
+  font-size:0.8rem; font-weight:700; color:var(--polla-muted); background:#EFEFEA;
+}
+.polla-grupo--correcto { color:#2F5A47; background:#E3EFE8; }
 
 @media (max-width: 640px) {
     .block-container { padding-left: 0.8rem; padding-right: 0.8rem; padding-bottom: 5.5rem !important; }
@@ -829,29 +843,32 @@ def vista_ranking():
     COL_EXACTO = "Exacto"
     COL_1X2 = "G/E/P"
 
-    filas_tabla = []
+    # Puesto compartido cuando empatan en puntos y exactos (mismo criterio
+    # de orden de arriba), para no mostrar un #4 y un #5 con igual marcador.
+    puesto, previo = 0, None
     for i, fila in enumerate(ranking, start=1):
-        nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
-        filas_tabla.append({
-            "Puesto": medallas.get(i, f"#{i}"),
-            "Jugador": nombre,
-            "Ptos": fila["puntos_totales"],
-            COL_EXACTO: fila["aciertos_exactos"],
-            COL_1X2: fila["aciertos_1x2"],
-        })
-    dfr = pd.DataFrame(filas_tabla)
-    st.dataframe(
-        dfr, width="stretch", hide_index=True,
-        column_config={
-            "Puesto": st.column_config.TextColumn(width="small"),
-            "Jugador": st.column_config.TextColumn(width="medium"),
-            "Ptos": st.column_config.NumberColumn(width="small"),
-            COL_EXACTO: st.column_config.NumberColumn(
-                width="small", help="Puntos por marcador exacto (1 por acierto)"),
-            COL_1X2: st.column_config.NumberColumn(
-                width="small", help="Puntos por G/E/P (1 por acierto)"),
-        })
+        clave = (fila["puntos_totales"], fila["aciertos_exactos"])
+        if clave != previo:
+            puesto, previo = i, clave
+        es_yo = fila["jugador_id"] == mi_id
+        clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
+        st.markdown(
+            f'<div class="{clase}">'
+            f'<span class="polla-medalla">{medallas.get(puesto, f"<small>#{puesto}</small>")}</span>'
+            f'<span class="polla-rank-nombre">{escape(fila["nombre"])}</span>'
+            f'<span class="polla-rank-detalle" title="{COL_EXACTO} · {COL_1X2}">'
+            f'{fila["aciertos_exactos"]} exacto{"" if fila["aciertos_exactos"] == 1 else "s"} · '
+            f'{fila["aciertos_1x2"]} G/E/P</span>'
+            f'<span class="polla-rank-puntos">{fila["puntos_totales"]}</span>'
+            f'</div>',
+            unsafe_allow_html=True)
+    st.caption("Desempate: más marcadores exactos.")
 
+    with st.expander("Detalle por fecha"):
+        vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas)
+
+
+def vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas):
     st.markdown("#### Puntos por fecha")
     filas_fecha = []
     for i, fila in enumerate(ranking, start=1):
@@ -918,11 +935,24 @@ def vista_resultados():
     ronda_sel = selector_fecha(rondas, key="ronda_res")
     partidos_ronda = sorted(
         (p for p in cerrados if p["fecha_ronda"] == ronda_sel), key=lambda p: p["kickoff"])
+    # Lectura propia del jugador (sin caché compartida): su pronóstico y
+    # sus puntos en cada partido, para no tener que ir a "Mis jugadas".
+    mis = {f["partido_id"]: f for f in (
+        db().table("v_puntos").select("partido_id, gl_pred, gv_pred, puntos, es_exacto")
+        .eq("jugador_id", st.session_state["jugador_id"])
+        .in_("partido_id", [p["id"] for p in partidos_ronda]).execute().data
+        if partidos_ronda else [])}
+    jugados = [f for f in mis.values() if f["puntos"] is not None]
+    if jugados:
+        st.markdown(
+            f'<div class="polla-progreso polla-progreso--ok">Sumaste <b>{sum(f["puntos"] for f in jugados)} '
+            f'pts</b> en {len(jugados)} de {len(partidos_ronda)} partidos de esta fecha</div>',
+            unsafe_allow_html=True)
 
-    for i, p in enumerate(partidos_ronda, start=1):
+    for p in partidos_ronda:
         with st.container(border=True, key=f"card_resultado_{p['id']}"):
-            kickoff_local = a_local(p["kickoff"]).strftime("%d/%m")
-            st.caption(f"Partido {i} — {kickoff_local}")
+            st.markdown(f'<div class="polla-fila-hora">{dia_hora_local(p["kickoff"])}</div>',
+                        unsafe_allow_html=True)
             st.markdown(
                 render_resultado(
                     p["local"], logo(p.get("local_id"), 24), p["gl_real"],
@@ -930,6 +960,13 @@ def vista_resultados():
                 ),
                 unsafe_allow_html=True,
             )
+            f = mis.get(p["id"])
+            if f:
+                tuyo = (f'<span>Tu pronóstico <b>{f["gl_pred"]}–{f["gv_pred"]}</b></span>'
+                        f'{pill_puntos(f["puntos"], f["es_exacto"])}')
+            else:
+                tuyo = '<span>No pronosticaste este partido</span>'
+            st.markdown(f'<div class="polla-tuyo">{tuyo}</div>', unsafe_allow_html=True)
 
 
 def vista_mis_predicciones():
@@ -1003,31 +1040,25 @@ def vista_mis_predicciones():
                     barra_reparto(len(grupos["local"]), len(grupos["empate"]), len(grupos["visita"])),
                     unsafe_allow_html=True)
 
-                cols = st.columns(3)
-                for col, tipo in zip(cols, ["local", "empate", "visita"]):
-                    with col:
-                        es_correcto = hay_resultado and tipo == resultado_real
-                        key = f"grupo_{'correcto' if es_correcto else 'otro'}_{p['id']}_{tipo}"
-                        with st.container(border=True, key=key):
-                            check = (
-                                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
-                                'stroke="#3E6A56" stroke-width="2.5" stroke-linecap="round" '
-                                'stroke-linejoin="round" style="vertical-align:-2px; margin-right:4px">'
-                                '<path d="M20 6 9 17l-5-5"/></svg>'
-                            ) if es_correcto else ""
-                            color_txt = "color:var(--polla-accent);" if es_correcto else "color:var(--polla-muted);"
-                            st.markdown(
-                                f'<div style="{color_txt} font-weight:700; font-size:12.5px; '
-                                f'margin-bottom:2px;">{check}{etiquetas[tipo]}</div>'
-                                f'<div style="font-size:20px; font-weight:800; {color_txt} '
-                                f'margin-bottom:8px;">{len(grupos[tipo])}</div>',
-                                unsafe_allow_html=True)
-                            if not grupos[tipo]:
-                                st.caption("Nadie")
-                            for f in grupos[tipo]:
-                                fila_pronostico_grupo(
-                                    f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"],
-                                    bool(f["es_exacto"]), f["jugador_id"] == jugador_id)
+                # Una sola lista (no 3 columnas, que en el celular se apilan
+                # y alargan cada partido): primero el grupo que acertó.
+                orden = ["local", "empate", "visita"]
+                if resultado_real:
+                    orden.sort(key=lambda t: t != resultado_real)
+                for tipo in orden:
+                    if not grupos[tipo]:
+                        continue
+                    es_correcto = hay_resultado and tipo == resultado_real
+                    clase = "polla-grupo polla-grupo--correcto" if es_correcto else "polla-grupo"
+                    marca = "✓ " if es_correcto else ""
+                    st.markdown(
+                        f'<div class="{clase}">{marca}{escape(str(etiquetas[tipo]))}'
+                        f'<span>{len(grupos[tipo])}</span></div>',
+                        unsafe_allow_html=True)
+                    for f in grupos[tipo]:
+                        fila_pronostico_grupo(
+                            f["jugadores"]["nombre"], f["gl_pred"], f["gv_pred"],
+                            bool(f["es_exacto"]), f["jugador_id"] == jugador_id)
 
     st.markdown("#### Mis predicciones de esta fecha")
     filas = (db().table("v_puntos").select("*, partidos(local, visita, kickoff, fecha_ronda, anulado)")
