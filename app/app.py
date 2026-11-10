@@ -60,7 +60,10 @@ st.markdown("""
 <style>
 :root {
   --polla-bg:#F7F7F2; --polla-card:#FFFFFF; --polla-accent:#6B9080;
-  --polla-text:#2F3E38; --polla-muted:#7A8A83; --polla-border:#E3E3DA;
+  --polla-text:#2F3E38; --polla-muted:#6B7A73; --polla-border:#E3E3DA;
+  /* Texto blanco sobre el salvia #6B9080 da ~3.9:1 (no alcanza 4.5:1 en
+     texto chico); este tono más oscuro da ~5.6:1. */
+  --polla-accent-oscuro:#4F7262;
   --polla-exacto:#7FB09A; --polla-1x2:#E4C580; --polla-fallo:#D89A9A;
 }
 
@@ -126,8 +129,8 @@ st.markdown("""
 
 .polla-badge {
   display:inline-block; padding:0.15rem 0.6rem; border-radius:999px;
-  font-size:0.75rem; font-weight:600; background:var(--polla-accent);
-  color:#fff;
+  font-size:0.75rem; font-weight:600; background:var(--polla-accent-oscuro);
+  color:#fff; white-space:nowrap;
 }
 .polla-badge--urgente { background:var(--polla-fallo); color:#4A2E2E; }
 .polla-badge--cerrado { background:#E3E3DA; color:var(--polla-muted); }
