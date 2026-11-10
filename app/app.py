@@ -90,6 +90,30 @@ st.markdown("""
 }
 .polla-fila-equipo span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .polla-fila-equipo img { flex-shrink:0; }
+.polla-fila-equipo { margin-top:0; font-size:0.9rem; }
+/* Fila escudo+nombre+marcador: nunca se parte en dos líneas; el nombre
+   se recorta con "…" (st-key-fila_gl_<id> / fila_gv_<id>). */
+[class*="st-key-fila_gl_"], [class*="st-key-fila_gv_"] { flex-wrap:nowrap !important; }
+[class*="st-key-fila_gl_"] > *, [class*="st-key-fila_gv_"] > * { min-width:0; }
+.polla-fila-cabecera {
+  display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+}
+.polla-saludo {
+  display:flex; align-items:center; gap:0.6rem; font-size:1.15rem; color:var(--polla-text);
+}
+.polla-progreso {
+  padding:0.55rem 0.8rem; border-radius:0.75rem; font-size:0.9rem;
+  background:#F3EEDD; color:var(--polla-text); border:1px solid #E8DFC2;
+}
+.polla-progreso--ok { background:#E8F0EB; border-color:#CFE0D6; }
+.polla-confirmar-fila {
+  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:0.6rem;
+  align-items:center; padding:0.35rem 0; border-bottom:1px solid var(--polla-border);
+  font-size:0.88rem;
+}
+.polla-confirmar-fila span:first-child { text-align:right; }
+.polla-confirmar-fila--cero { background:#F3EEDD; border-radius:0.4rem; }
+.polla-confirmar-fila b { font-variant-numeric:tabular-nums; }
 
 .polla-equipo { text-align:center; min-height:4.6rem; }
 .polla-equipo img { display:block; margin:0 auto; }
@@ -207,15 +231,16 @@ st.markdown("""
     div[id*="viewerBadge"], div[class*="viewerBadge"],
     a[href*="streamlit.io/cloud"],
     a[href^="https://streamlit.io"] { display:none !important; }
-    /* Botones +/- del marcador: área táctil grande en móvil (112px).
+    /* Botones +/- del marcador: área táctil de 48px (≥44px recomendado),
+       compatible con escudo + nombre + marcador en una sola fila.
        Testids verificados en Streamlit 1.60.0. */
     [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {
-        min-width: 7rem !important;
-        min-height: 7rem !important;
+        min-width: 3rem !important;
+        min-height: 3rem !important;
     }
     [data-testid="stNumberInputStepUp"] svg, [data-testid="stNumberInputStepDown"] svg {
-        width: 2.8rem !important;
-        height: 2.8rem !important;
+        width: 1.6rem !important;
+        height: 1.6rem !important;
     }
 }
 </style>
@@ -509,54 +534,126 @@ def cargar_predicciones(jugador_id):
 
 
 def tarjeta_partido(p, mis_pred):
-    """Fila compacta: hora+badge, luego una línea corta por equipo (escudo +
-    nombre + su marcador). Streamlit apila st.columns en una sola columna
-    vertical bajo cierto ancho SIN importar cuántas haya (incluso 2,
-    comprobado) — forzar layout horizontal vía CSS no es fiable porque
-    Streamlit recalcula el flex-flow de sus bloques por JS en cada resize.
-    Por eso cada equipo va en su propia línea (más compacta que la tarjeta
-    anterior: escudo+goles comparten línea en vez de equipo arriba/input
-    abajo por separado). Los nombres permanecen como etiquetas accesibles,
-    no como texto visible."""
+    """Una línea por equipo: escudo, nombre y su marcador en la misma fila
+    (st.container(horizontal=True) sí se mantiene horizontal en el celular,
+    a diferencia de st.columns). Arranca en 0 y no vacío: con value=None
+    Streamlit 1.60 desactiva los botones +/- (comprobado). El 0-0 sin tocar
+    se ataja en el resumen de confirmar_pronosticos()."""
     existente = mis_pred.get(p["id"])
-    local_accesible = escape(str(p["local"]), quote=True)
-    visita_accesible = escape(str(p["visita"]), quote=True)
     with st.container(border=True, key=f"card_partido_{p['id']}"):
-        kickoff_local = dia_hora_local(p["kickoff"])
-        c_info, c_badge = st.columns([2, 1])
-        with c_info:
-            st.markdown(f'<div class="polla-fila-hora">{kickoff_local}</div>', unsafe_allow_html=True)
-        with c_badge:
-            st.markdown(badge_cuenta_regresiva(p["cierre_predicciones"]), unsafe_allow_html=True)
-
         st.markdown(
-            f'<div class="polla-fila-equipo" role="img" aria-label="Escudo de {local_accesible}">'
-            f'{logo(p.get("local_id"), 30)}</div>',
+            f'<div class="polla-fila-cabecera"><span class="polla-fila-hora">'
+            f'{dia_hora_local(p["kickoff"])}</span>{badge_cuenta_regresiva(p["cierre_predicciones"])}</div>',
             unsafe_allow_html=True)
-        gl = st.number_input(f'Goles de {p["local"]}', min_value=0, max_value=15, step=1,
-                              value=existente["gl_pred"] if existente else 0,
-                              key=f"{'saved_gl' if existente else 'gl'}_{p['id']}",
-                              label_visibility="collapsed", disabled=existente is not None)
-
-        st.markdown(
-            f'<div class="polla-fila-equipo" role="img" aria-label="Escudo de {visita_accesible}">'
-            f'{logo(p.get("visita_id"), 30)}</div>',
-            unsafe_allow_html=True)
-        gv = st.number_input(f'Goles de {p["visita"]}', min_value=0, max_value=15, step=1,
-                              value=existente["gv_pred"] if existente else 0,
-                              key=f"{'saved_gv' if existente else 'gv'}_{p['id']}",
-                              label_visibility="collapsed", disabled=existente is not None)
+        goles = []
+        for lado, sufijo in (("local", "gl"), ("visita", "gv")):
+            with st.container(horizontal=True, vertical_alignment="center", gap="small",
+                              key=f"fila_{sufijo}_{p['id']}"):
+                st.markdown(
+                    f'<div class="polla-fila-equipo">{logo(p.get(f"{lado}_id"), 28)}'
+                    f'<span>{escape(str(p[lado]))}</span></div>',
+                    unsafe_allow_html=True, width="stretch")
+                goles.append(st.number_input(
+                    f"Goles de {p[lado]}", min_value=0, max_value=15, step=1,
+                    value=existente[f"{sufijo}_pred"] if existente else 0,
+                    key=f"{'saved_' if existente else ''}{sufijo}_{p['id']}",
+                    label_visibility="collapsed", disabled=existente is not None, width=136))
         if existente:
             st.caption("🔒 Pronóstico guardado y definitivo.")
-    return gl, gv
+    return goles[0], goles[1]
+
+
+@st.fragment(run_every=60)
+def linea_progreso(ronda, partidos_ronda, n_faltantes):
+    """Progreso de la fecha y próximo cierre. Es un fragmento que se
+    refresca solo cada minuto: la cuenta regresiva avanza sin recargar y
+    sin volver a ejecutar el formulario."""
+    abiertos = [p for p in partidos_ronda
+                if pd.to_datetime(p["cierre_predicciones"]) > datetime.now(timezone.utc)]
+    proximo = min((p["cierre_predicciones"] for p in abiertos), default=None)
+    listos = len(partidos_ronda) - n_faltantes
+    clase = "polla-progreso polla-progreso--ok" if n_faltantes == 0 else "polla-progreso"
+    cierre = f" · próximo cierre {badge_cuenta_regresiva(proximo)}" if proximo else ""
+    st.markdown(
+        f'<div class="{clase}"><b>Fecha {ronda}</b> · {listos} de {len(partidos_ronda)} '
+        f'pronosticados{cierre}</div>',
+        unsafe_allow_html=True)
+
+
+@st.dialog("Confirma tus pronósticos")
+def confirmar_pronosticos(ronda_sel, listos, partidos_ronda):
+    """Resumen antes de guardar: al confirmar quedan definitivos. Los 0-0
+    se marcan porque es el valor inicial: puede ser un partido sin tocar."""
+    por_id = {p["id"]: p for p in partidos_ronda}
+    n_ceros = 0
+    for partido_id, (gl, gv) in listos.items():
+        p = por_id[partido_id]
+        cero = int(gl) == 0 and int(gv) == 0
+        n_ceros += cero
+        clase = "polla-confirmar-fila polla-confirmar-fila--cero" if cero else "polla-confirmar-fila"
+        st.markdown(
+            f'<div class="{clase}"><span>{escape(str(p["local"]))}</span>'
+            f'<b>{int(gl)} – {int(gv)}</b><span>{escape(str(p["visita"]))}</span></div>',
+            unsafe_allow_html=True)
+    if n_ceros:
+        st.warning(f"Revisa {'el 0-0 marcado' if n_ceros == 1 else f'los {n_ceros} 0-0 marcados'}: "
+                   "¿de verdad es tu pronóstico o te faltó cambiarlo?")
+    st.caption("Al guardar quedan definitivos: no se podrán cambiar.")
+    c1, c2 = st.columns(2)
+    if c1.button("Volver a editar", width="stretch"):
+        st.rerun()
+    if c2.button("Sí, guardar", type="primary", width="stretch"):
+        guardar_pronosticos(ronda_sel, listos)
+        st.rerun()
+
+
+def guardar_pronosticos(ronda_sel, valores):
+    # La RPC de Postgres decide con su propio reloj si el plazo sigue
+    # abierto, aunque el formulario se haya cargado antes o el sync
+    # todavía no haya actualizado `cerrado`.
+    jugador_id = st.session_state["jugador_id"]
+    ids = list(valores.keys())
+    frescos = {p["id"]: p for p in db().table("partidos").select("id, local, visita")
+               .in_("id", ids).execute().data}
+    guardados, rechazados = 0, []
+    confirmadas = []
+    for partido_id, (gl, gv) in valores.items():
+        p = frescos.get(partido_id)
+        if not p:
+            rechazados.append(p["local"] + " vs " + p["visita"] if p else f"partido {partido_id}")
+            continue
+        try:
+            save_prediction(db(), jugador_id, partido_id, gl, gv)
+        except Exception as error:
+            if any(motivo in str(error).lower()
+                   for motivo in ("plazo cerrado", "prediccion ya guardada", "prediccion definitiva")):
+                rechazados.append(p["local"] + " vs " + p["visita"])
+                continue
+            raise
+        guardados += 1
+        confirmadas.append({"local": p["local"], "visita": p["visita"], "gl": int(gl), "gv": int(gv)})
+
+    if confirmadas:
+        jugador = db().table("jugadores").select("email").eq("id", jugador_id).single().execute().data
+        if jugador and jugador.get("email"):
+            enqueue_confirmation(
+                db(), jugador["email"], st.session_state["jugador_nombre"], ronda_sel,
+                confirmadas, player_id=jugador_id)
+        # Revelación: sale ya si con este guardado todos completaron la
+        # fecha; si no, el sync la manda al kickoff del 2° partido (y
+        # también la cubre si este disparo no alcanzara a encolarse).
+        if fecha_totalmente_predicha(calcular_estado_prediccion(ronda_sel)):
+            intentar_notificar_todos_predijeron(ronda_sel)
+
+    st.session_state["mensaje_guardado"] = (guardados, rechazados)
 
 
 def vista_predicciones():
     jugador_id = st.session_state["jugador_id"]
     st.markdown(
-        f'<div style="text-align:center">{logo(LIGA_ID, 70)}</div>',
+        f'<div class="polla-saludo">{logo(LIGA_ID, 40)}'
+        f'<span>Hola, <b>{escape(st.session_state["jugador_nombre"])}</b> 👋</span></div>',
         unsafe_allow_html=True)
-    st.subheader(f"Hola, {st.session_state['jugador_nombre']} 👋")
 
     # Mensaje persistente: el st.success de más abajo se mostraba un instante
     # antes del st.rerun() y desaparecía sin que el usuario lo notara, dejando
@@ -575,75 +672,38 @@ def vista_predicciones():
         return
 
     mis_pred = cargar_predicciones(jugador_id)
-    st.caption("Marcador exacto: 1 pt por Exacto + 1 pt por G/E/P (2 pts total); G/E/P no exacto: 1 pt; fallo: 0.")
-    st.info("Al guardar, tus pronósticos quedan definitivos y no se pueden modificar. Revisa los marcadores antes de enviarlos.")
-
     rondas = sorted({p["fecha_ronda"] for p in partidos}, key=lambda r: (r is None, r))
-    ronda_sel = selector_fecha(rondas, key="ronda_pred")
-    partidos_ronda = [p for p in partidos if p["fecha_ronda"] == ronda_sel]
-
-    faltantes = [p for p in partidos_ronda if p["id"] not in mis_pred]
-    if faltantes:
-        st.warning(f"⚠️ Te faltan {len(faltantes)} de {len(partidos_ronda)} partidos por predecir en esta fecha.")
+    if len(rondas) > 1:
+        ronda_sel = selector_fecha(rondas, key="ronda_pred")
     else:
-        st.success(f"✅ Ya predijiste los {len(partidos_ronda)} partidos de esta fecha.")
+        ronda_sel = rondas[0]
+    partidos_ronda = [p for p in partidos if p["fecha_ronda"] == ronda_sel]
+    faltantes = [p for p in partidos_ronda if p["id"] not in mis_pred]
+
+    linea_progreso(ronda_sel, partidos_ronda, len(faltantes))
+    with st.expander("¿Cómo se puntúa?"):
+        st.caption("Marcador exacto: 1 pt por Exacto + 1 pt por G/E/P (2 pts total); "
+                   "G/E/P no exacto: 1 pt; fallo: 0. Los pronósticos guardados son "
+                   "definitivos.")
 
     # La revelación sigue impidiendo nuevas jugadas para una fecha ya visible.
     # Cada pronóstico guardado es definitivo, aunque la fecha aún no se revele.
     if fecha_ya_revelada(ronda_sel):
         st.info("🔒 Todos ya predijeron esta fecha — las predicciones quedaron congeladas. "
-                "Ve a 'Mis predicciones' para verlas todas.")
+                "Ve a 'Mis jugadas' para verlas todas.")
         return
 
     with st.form("form_predicciones"):
         valores = {}
-        for i, p in enumerate(partidos_ronda, start=1):
-            st.caption(f"Partido {i}")
+        for p in partidos_ronda:
             gl, gv = tarjeta_partido(p, mis_pred)
             if p["id"] not in mis_pred:
                 valores[p["id"]] = (gl, gv)
+        enviado = st.form_submit_button("Revisar y guardar", type="primary",
+                                       disabled=not faltantes, width="stretch")
 
-        enviado = st.form_submit_button("Guardar predicciones definitivas", type="primary",
-                                       disabled=not faltantes)
-        if enviado:
-            # La RPC de Postgres decide con su propio reloj si el plazo sigue
-            # abierto, aunque el formulario se haya cargado antes o el sync
-            # todavía no haya actualizado `cerrado`.
-            ids = list(valores.keys())
-            frescos = {p["id"]: p for p in db().table("partidos").select("id, local, visita")
-                       .in_("id", ids).execute().data}
-            guardados, rechazados = 0, []
-            confirmadas = []
-            for partido_id, (gl, gv) in valores.items():
-                p = frescos.get(partido_id)
-                if not p:
-                    rechazados.append(p["local"] + " vs " + p["visita"] if p else f"partido {partido_id}")
-                    continue
-                try:
-                    save_prediction(db(), jugador_id, partido_id, gl, gv)
-                except Exception as error:
-                    if any(motivo in str(error).lower()
-                           for motivo in ("plazo cerrado", "prediccion ya guardada", "prediccion definitiva")):
-                        rechazados.append(p["local"] + " vs " + p["visita"])
-                        continue
-                    raise
-                guardados += 1
-                confirmadas.append({"local": p["local"], "visita": p["visita"], "gl": int(gl), "gv": int(gv)})
-
-            if confirmadas:
-                jugador = db().table("jugadores").select("email").eq("id", jugador_id).single().execute().data
-                if jugador and jugador.get("email"):
-                    enqueue_confirmation(
-                        db(), jugador["email"], st.session_state["jugador_nombre"], ronda_sel,
-                        confirmadas, player_id=jugador_id)
-                # Revelación: sale ya si con este guardado todos completaron la
-                # fecha; si no, el sync la manda al kickoff del 2° partido (y
-                # también la cubre si este disparo no alcanzara a encolarse).
-                if fecha_totalmente_predicha(calcular_estado_prediccion(ronda_sel)):
-                    intentar_notificar_todos_predijeron(ronda_sel)
-
-            st.session_state["mensaje_guardado"] = (guardados, rechazados)
-            st.rerun()
+    if enviado and valores:
+        confirmar_pronosticos(ronda_sel, valores, partidos_ronda)
 
 
 def fila_estado_jugador(nombre, n, total_fecha, completo, es_yo, fecha_cerrada=False):
