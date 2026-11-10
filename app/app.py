@@ -231,6 +231,9 @@ st.markdown("""
     }
     .st-key-nav button p { font-size:0.64rem; white-space:nowrap; letter-spacing:-0.01em; margin:0; }
     .st-key-nav button [data-testid="stIconMaterial"] { font-size:1.2rem; }
+    /* La barra va por encima de todo (z-index alto); con un diálogo
+       abierto (resumen de pronósticos) se oculta para no taparlo. */
+    body:has([role="dialog"]) .st-key-nav { display:none; }
     /* El botón "Deploy" del header de Streamlit Cloud (data-testid
        verificado en 1.64.0) queda por encima del nav inferior con su
        z-index de header por defecto. No aporta nada a los jugadores —
@@ -496,7 +499,7 @@ def crear_sesion_jugador(player):
 
 
 def limpiar_sesion():
-    for key in ("sesion_token", "jugador_id", "jugador_nombre", "es_admin"):
+    for key in ("sesion_token", "jugador_id", "jugador_nombre", "es_admin", "nav"):
         st.session_state.pop(key, None)
 
 
@@ -718,6 +721,9 @@ def vista_predicciones():
                 valores[p["id"]] = (gl, gv)
         enviado = st.form_submit_button("Revisar y guardar", type="primary",
                                        disabled=not faltantes, width="stretch")
+        if faltantes:
+            st.caption("Si cambias de pestaña antes de guardar, se pierden los marcadores "
+                       "que no hayas guardado.")
 
     if enviado and valores:
         confirmar_pronosticos(ronda_sel, valores, partidos_ronda)
@@ -846,13 +852,16 @@ def vista_ranking():
     COL_EXACTO = "Exacto"
     COL_1X2 = "G/E/P"
 
-    # Puesto compartido cuando empatan en puntos y exactos (mismo criterio
-    # de orden de arriba), para no mostrar un #4 y un #5 con igual marcador.
-    puesto, previo = 0, None
+    # Igual puntaje = mismo puesto. El reglamento (numeral 7, ver
+    # sync_polla.py) trata el empate en puntos como empate con desempate
+    # manual: los exactos solo ordenan la lista, no deciden el puesto.
+    puestos, previo = {}, None
     for i, fila in enumerate(ranking, start=1):
-        clave = (fila["puntos_totales"], fila["aciertos_exactos"])
-        if clave != previo:
-            puesto, previo = i, clave
+        if fila["puntos_totales"] != previo:
+            puesto, previo = i, fila["puntos_totales"]
+        puestos[fila["jugador_id"]] = puesto
+    for fila in ranking:
+        puesto = puestos[fila["jugador_id"]]
         es_yo = fila["jugador_id"] == mi_id
         clase = "polla-rank-row polla-rank-row--yo" if es_yo else "polla-rank-row"
         st.markdown(
@@ -865,20 +874,20 @@ def vista_ranking():
             f'<span class="polla-rank-puntos">{fila["puntos_totales"]}</span>'
             f'</div>',
             unsafe_allow_html=True)
-    st.caption("Desempate: más marcadores exactos.")
+    st.caption("Con igual puntaje se comparte el puesto.")
 
     with st.expander("Detalle por fecha"):
-        vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas)
+        vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas, puestos)
 
 
-def vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas):
+def vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas, puestos):
     st.markdown("#### Puntos por fecha")
     filas_fecha = []
     for i, fila in enumerate(ranking, start=1):
         nombre = fila["nombre"] + (" 👤" if fila["jugador_id"] == mi_id else "")
         puntos_jugador = por_fecha.get(fila["jugador_id"], {})
         filas_fecha.append({
-            "Puesto": medallas.get(i, f"#{i}"),
+            "Puesto": medallas.get(puestos[fila["jugador_id"]], f"#{puestos[fila['jugador_id']]}"),
             "Jugador": nombre,
             **{f"F{r}": puntos_jugador.get(r, 0) for r in fechas_polla},
             "Total": fila["puntos_totales"],
@@ -909,7 +918,8 @@ def vista_ranking_detalle(ranking, por_fecha, fechas_polla, mi_id, medallas):
             f'<div style="display:grid; grid-template-columns:140px 1fr 32px; align-items:center; '
             f'gap:10px; margin-bottom:10px;">'
             f'<div style="font-size:0.82rem; font-weight:600; white-space:nowrap; overflow:hidden; '
-            f'text-overflow:ellipsis;">{medallas.get(i, f"#{i}")} {nombre}</div>'
+            f'text-overflow:ellipsis;">{medallas.get(puestos[fila["jugador_id"]], f"#{puestos[fila['jugador_id']]}")} '
+            f'{nombre}</div>'
             f'<div style="height:16px; border-radius:4px; overflow:hidden; display:flex; '
             f'background:#EFEFEA;">{segmentos_html}</div>'
             f'<div style="text-align:right; font-size:0.86rem; font-weight:800;">{fila["puntos_totales"]}</div>'
