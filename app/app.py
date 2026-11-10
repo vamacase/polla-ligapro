@@ -213,7 +213,12 @@ st.markdown("""
        ser la barra de navegación inferior; en escritorio queda arriba. */
     .st-key-nav {
         position:fixed; left:0; right:0; bottom:0; z-index:1000000;
-        padding:0.35rem 0.2rem max(0.45rem, env(safe-area-inset-bottom));
+        /* Streamlit Cloud pinta su botón rojo "Hosted with Streamlit" y el
+           avatar del creador abajo a la derecha, FUERA del iframe de la app:
+           ningún CSS de aquí los puede ocultar (comprobado 10/11/2026 en el
+           celular: tapaban "Mis jugadas" y "Perfil"). Se deja libre esa
+           franja de ~112px a la derecha. */
+        padding:0.35rem 7rem max(0.45rem, env(safe-area-inset-bottom)) 0.2rem;
         background:var(--polla-card); border-top:1px solid var(--polla-border);
         box-shadow:0 -2px 10px rgba(47, 62, 56, 0.10);
     }
