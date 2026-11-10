@@ -7,7 +7,8 @@ APP = (Path(__file__).parents[1] / "app" / "app.py").read_text(encoding="utf-8")
 def test_mobile_css_is_injected_through_markdown_compatible_style_path():
     assert 'st.markdown("""' in APP
     assert "unsafe_allow_html=True" in APP
-    assert 'div[data-testid="stTabs"] [role="tablist"]' in APP
+    assert '.st-key-nav {' in APP
+    assert 'key="nav"' in APP
     assert "position:fixed" in APP
 
 

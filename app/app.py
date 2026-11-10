@@ -168,15 +168,28 @@ st.markdown("""
     .polla-scoreline { gap:0.25rem; }
     .polla-score-team { gap:0.2rem; font-size:0.8rem; }
     .polla-score-pair { min-width:3.4rem; padding:0.2rem 0.35rem; }
-    /* Las pestañas existentes pasan a funcionar como navegación inferior;
-       solo cambia su posición en pantalla, no la selección ni el contenido. */
-    div[data-testid="stTabs"] [role="tablist"] {
+    /* El selector de vistas (key="nav" → clase pública .st-key-nav) pasa a
+       ser la barra de navegación inferior; en escritorio queda arriba. */
+    .st-key-nav {
         position:fixed; left:0; right:0; bottom:0; z-index:1000000;
-        display:flex; flex-wrap:nowrap; justify-content:space-around;
         padding:0.35rem 0.2rem max(0.45rem, env(safe-area-inset-bottom));
         background:var(--polla-card); border-top:1px solid var(--polla-border);
         box-shadow:0 -2px 10px rgba(47, 62, 56, 0.10);
     }
+    .st-key-nav > div, .st-key-nav div:has(> button) {
+        display:flex; flex-wrap:nowrap; width:100%; gap:0.15rem;
+    }
+    .st-key-nav button {
+        display:flex; flex:1 1 0; flex-direction:column; align-items:center;
+        justify-content:center; min-width:0; min-height:2.9rem; padding:0.25rem 0.1rem;
+        border:0 !important; border-radius:0.6rem !important;
+        font-size:0.66rem; line-height:1.1; white-space:normal;
+    }
+    .st-key-nav button > div, .st-key-nav button > div > span {
+        display:flex; flex-direction:column; align-items:center; gap:0.1rem; min-width:0;
+    }
+    .st-key-nav button p { font-size:0.64rem; white-space:nowrap; letter-spacing:-0.01em; margin:0; }
+    .st-key-nav button [data-testid="stIconMaterial"] { font-size:1.2rem; }
     /* El botón "Deploy" del header de Streamlit Cloud (data-testid
        verificado en 1.64.0) queda por encima del nav inferior con su
        z-index de header por defecto. No aporta nada a los jugadores —
@@ -194,18 +207,6 @@ st.markdown("""
     div[id*="viewerBadge"], div[class*="viewerBadge"],
     a[href*="streamlit.io/cloud"],
     a[href^="https://streamlit.io"] { display:none !important; }
-    div[data-testid="stTabs"] [role="tablist"] button[role="tab"] {
-        display:flex; flex:1 1 0; flex-direction:column; align-items:center;
-        justify-content:center; min-width:0; min-height:2.8rem; padding:0.25rem 0.1rem;
-        border:0; font-size:0.68rem; line-height:1.15; white-space:normal;
-    }
-    div[data-testid="stTabs"] [role="tablist"] button[role="tab"] > div {
-        display:flex; flex-direction:column; align-items:center; justify-content:center;
-        gap:0.12rem; text-align:center;
-    }
-    div[data-testid="stTabs"] [role="tablist"] button[role="tab"] [data-testid="stIconMaterial"] {
-        font-size:1.15rem;
-    }
     /* Botones +/- del marcador: área táctil grande en móvil (112px).
        Testids verificados en Streamlit 1.60.0. */
     [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {
@@ -237,6 +238,35 @@ def cargar_logos():
     """
     filas = db().table("equipos").select("id, logo_base64").execute().data
     return {f["id"]: f["logo_base64"] for f in filas if f["logo_base64"]}
+
+
+# Lecturas cacheadas de las vistas de solo consulta. st.cache_data es
+# compartido entre TODAS las sesiones: nada de aquí depende del jugador que
+# mira, y el TTL corto hace que un resultado nuevo aparezca en <1 min. El
+# camino de guardado y la revelación leen siempre sin caché.
+@st.cache_data(ttl=300)
+def leer_jugadores():
+    return db().table("jugadores").select("id, nombre").order("nombre").execute().data
+
+
+@st.cache_data(ttl=60)
+def leer_rondas_partidos():
+    return db().table("partidos").select("id, fecha_ronda, cerrado").execute().data
+
+
+@st.cache_data(ttl=60)
+def leer_puntos_partidos(ids_partidos: tuple):
+    if not ids_partidos:
+        return []
+    return (db().table("v_puntos").select("jugador_id, partido_id, puntos, es_exacto")
+            .in_("partido_id", list(ids_partidos)).not_.is_("puntos", "null")
+            .execute().data)
+
+
+@st.cache_data(ttl=60)
+def leer_resultados_recientes():
+    return (db().table("partidos").select("*").eq("cerrado", True).eq("anulado", False)
+            .not_.is_("gl_real", "null").order("kickoff", desc=True).limit(20).execute().data)
 
 
 def logo(team_id, size=48):
@@ -434,7 +464,7 @@ def login():
             f'<div style="text-align:center">{logo(LIGA_ID, 100)}</div>',
             unsafe_allow_html=True)
         st.title("Polla Liga Pro Ecuador")
-        jugadores = db().table("jugadores").select("id, nombre").order("nombre").execute().data
+        jugadores = leer_jugadores()
         if not jugadores:
             st.error("Aún no hay jugadores registrados. Pídele al admin que te agregue.")
             st.stop()
@@ -692,8 +722,8 @@ def fila_pronostico_grupo(nombre, gl_pred, gv_pred, es_exacto, es_yo):
 def vista_ranking():
     st.subheader("🏆 Ranking")
 
-    jugadores = db().table("jugadores").select("id, nombre").execute().data
-    partidos = db().table("partidos").select("id, fecha_ronda").execute().data
+    jugadores = leer_jugadores()
+    partidos = leer_rondas_partidos()
     if not partidos:
         st.info("Todavía no hay partidos cargados.")
         return
@@ -712,11 +742,7 @@ def vista_ranking():
     ronda_por_partido = {p["id"]: p["fecha_ronda"] for p in partidos}
     fechas_polla = list(range(ini, fin + 1))
 
-    puntos_filas = []
-    if ids_partidos:
-        puntos_filas = (db().table("v_puntos").select("jugador_id, partido_id, puntos, es_exacto")
-                         .in_("partido_id", ids_partidos).not_.is_("puntos", "null")
-                         .execute().data)
+    puntos_filas = leer_puntos_partidos(tuple(sorted(ids_partidos)))
 
     agregados = {}
     por_fecha = {}  # jugador_id -> {fecha_ronda: puntos}
@@ -823,8 +849,7 @@ def vista_ranking():
 
 def vista_resultados():
     st.subheader("📋 Últimos resultados")
-    cerrados = (db().table("partidos").select("*").eq("cerrado", True).eq("anulado", False)
-                .not_.is_("gl_real", "null").order("kickoff", desc=True).limit(20).execute().data)
+    cerrados = leer_resultados_recientes()
     if not cerrados:
         st.info("Aún no hay resultados cargados.")
         return
@@ -855,7 +880,7 @@ def vista_mis_predicciones():
     # en los que el jugador actual ya predijo — si no, alguien que aún no
     # predice nada en una fecha ni siquiera podría seleccionarla para ver
     # el checklist de quién sí lo hizo.
-    partidos_todos = db().table("partidos").select("fecha_ronda, cerrado").execute().data
+    partidos_todos = leer_rondas_partidos()
     rondas = sorted({p["fecha_ronda"] for p in partidos_todos if p["fecha_ronda"] is not None}, reverse=True)
     if not rondas:
         st.info("Todavía no hay partidos cargados.")
@@ -1084,73 +1109,82 @@ def main():
     if "jugador_id" not in st.session_state:
         login()
         return
+    app_autenticada()
 
+
+def app_autenticada():
+    """Todo lo que ve un jugador ya autenticado (main() decide si lo está)."""
     es_admin = st.session_state.get("es_admin", False)
-    nombres_tabs = [
-        ":material/sports_soccer: Predecir",
-        ":material/leaderboard: Ranking",
-        ":material/sports_score: Resultados",
-        ":material/edit_note: Mis jugadas",
-    ]
+    # Navegación con un solo widget: a diferencia de st.tabs (que ejecuta las
+    # 4 vistas y todas sus consultas en cada clic), solo se dibuja la vista
+    # elegida. key="nav" genera la clase pública .st-key-nav que usa el CSS
+    # de la barra inferior en móvil.
+    vistas = {
+        "Predecir": (":material/sports_soccer:", vista_predicciones),
+        "Ranking": (":material/leaderboard:", vista_ranking),
+        "Resultados": (":material/sports_score:", vista_resultados),
+        "Mis jugadas": (":material/edit_note:", vista_mis_predicciones),
+        "Perfil": (":material/person:", vista_perfil),
+    }
     if es_admin:
-        nombres_tabs.append(":material/admin_panel_settings: Admin")
-    tabs = st.tabs(nombres_tabs)
-    with tabs[0]:
-        vista_predicciones()
-    with tabs[1]:
-        vista_ranking()
-    with tabs[2]:
-        vista_resultados()
-    with tabs[3]:
-        vista_mis_predicciones()
-    if es_admin:
-        with tabs[4]:
-            vista_admin()
+        vistas["Admin"] = (":material/admin_panel_settings:", vista_admin)
+    if st.session_state.get("nav") not in vistas:
+        st.session_state["nav"] = "Predecir"
+    eleccion = st.segmented_control(
+        "Navegación", list(vistas), key="nav", required=True,
+        format_func=lambda v: f"{vistas[v][0]} {v}", label_visibility="collapsed",
+        width="stretch")
+    vistas[eleccion or "Predecir"][1]()
 
-    with st.sidebar:
-        st.write(f"Sesión: **{st.session_state['jugador_nombre']}**")
-        if st.button("Cerrar sesión"):
-            limpiar_sesion()
-            cookies().remove(COOKIE_SESION)
-            # Misma condición de carrera que en login(): sin esta pausa, el
-            # rerun corta el ciclo antes de que el navegador borre la cookie.
-            time.sleep(0.5)
-            st.rerun()
 
-        if not es_admin:
-            with st.expander("Acceso Administrador"):
-                admin_password = st.text_input("Contraseña de administrador", type="password",
-                                               key="admin_password_input")
-                if st.button("Ingresar como admin"):
-                    expected = get_secret("ADMIN_PASSWORD")
-                    if (expected and len(expected) >= 16
-                            and hmac.compare_digest(admin_password.encode(), expected.encode())):
-                        st.session_state["es_admin"] = True
+def vista_perfil():
+    """Sesión, PIN y acceso de administrador. Antes vivían en la barra
+    lateral, que en el celular queda escondida detrás del menú."""
+    es_admin = st.session_state.get("es_admin", False)
+    st.subheader("👤 Perfil")
+    st.write(f"Sesión iniciada como **{st.session_state['jugador_nombre']}**")
+    if st.button("Cerrar sesión"):
+        limpiar_sesion()
+        cookies().remove(COOKIE_SESION)
+        # Misma condición de carrera que en login(): sin esta pausa, el
+        # rerun corta el ciclo antes de que el navegador borre la cookie.
+        time.sleep(0.5)
+        st.rerun()
+
+    with st.expander("Cambiar mi PIN"):
+        with st.form("form_cambiar_pin"):
+            pin_actual = st.text_input("PIN actual", type="password", max_chars=4)
+            pin_nuevo = st.text_input("PIN nuevo (4 dígitos)", type="password", max_chars=4)
+            pin_nuevo2 = st.text_input("Repite el PIN nuevo", type="password", max_chars=4)
+            if st.form_submit_button("Actualizar PIN"):
+                if not validar_pin(pin_nuevo):
+                    st.error("El PIN nuevo debe ser de 4 dígitos.")
+                elif pin_nuevo != pin_nuevo2:
+                    st.error("Los PIN nuevos no coinciden.")
+                else:
+                    fila = cambiar_pin(db(), st.session_state["jugador_id"], pin_actual, pin_nuevo)
+                    if fila:
+                        crear_sesion_jugador(fila)
+                        st.success("PIN actualizado.")
+                        time.sleep(0.5)
                         st.rerun()
                     else:
                         st.error(ERROR_ACCESO)
-        else:
-            st.success("Sesión de administrador activa")
 
-        with st.expander("Cambiar mi PIN"):
-            with st.form("form_cambiar_pin"):
-                pin_actual = st.text_input("PIN actual", type="password", max_chars=4)
-                pin_nuevo = st.text_input("PIN nuevo (4 dígitos)", type="password", max_chars=4)
-                pin_nuevo2 = st.text_input("Repite el PIN nuevo", type="password", max_chars=4)
-                if st.form_submit_button("Actualizar PIN"):
-                    if not validar_pin(pin_nuevo):
-                        st.error("El PIN nuevo debe ser de 4 dígitos.")
-                    elif pin_nuevo != pin_nuevo2:
-                        st.error("Los PIN nuevos no coinciden.")
-                    else:
-                        fila = cambiar_pin(db(), st.session_state["jugador_id"], pin_actual, pin_nuevo)
-                        if fila:
-                            crear_sesion_jugador(fila)
-                            st.success("PIN actualizado.")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.error(ERROR_ACCESO)
+    if not es_admin:
+        with st.expander("Acceso Administrador"):
+            admin_password = st.text_input("Contraseña de administrador", type="password",
+                                           key="admin_password_input")
+            if st.button("Ingresar como admin"):
+                expected = get_secret("ADMIN_PASSWORD")
+                if (expected and len(expected) >= 16
+                        and hmac.compare_digest(admin_password.encode(), expected.encode())):
+                    st.session_state["es_admin"] = True
+                    st.rerun()
+                else:
+                    st.error(ERROR_ACCESO)
+    else:
+        st.success("Sesión de administrador activa")
 
 
 if __name__ == "__main__":
